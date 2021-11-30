@@ -1,5 +1,5 @@
 #!/usr/bin/env python3 
-from Piraha import parse_peg_src, Matcher
+from Piraha import parse_peg_src, Matcher, Group
 from subprocess import Popen, PIPE, STDOUT
 import os
 import sys
@@ -42,7 +42,7 @@ else:
 
 grammar = r"""
 skipper=\b([ \t]|\\\n|\#.*)*
-raw_word=[^"'\t \n\$\#&\|;{}`()<>]+
+raw_word=[^"'\t \n\$\#&\|;{}`()<>?*,]+
 dchar=[^"$\\]
 dlit=\\.
 dquote="({dlit}|{dchar}|{var}|{math}|{subproc}|{bquote})*"
@@ -52,9 +52,16 @@ unset=:-
 unset_raw=-
 rm_front=\#\#?
 rm_back=%%?
-var=\$([A-Za-z0-9_]+|\{([a-zA-Z0-9_]+({unset}{word}|{unset_raw}{raw_word}|{rm_front}{word}|{rm_back}{word}|))\})
-func=function {ident} \( \) \{( {cmd})* \}
-word=({redir}|{ml}|{var}|{math}|{subproc}|{raw_word}|{squote}|{dquote}|{bquote})+
+w=[a-zA-Z0-9_]+
+var=\$({-w}|\{({-w}({unset}{word2}+|{unset_raw}{raw_word}|{rm_front}{word2}|{rm_back}{word2}|))\})
+func=function {ident} \( \) \{( {cmd})* \}[ \t]*\n
+
+worditem=({glob}|{redir}|{ml}|{var}|{math}|{subproc}|{raw_word}|{squote}|{dquote}|{bquote})
+worditemex=({glob}|{redir}|{ml}|{var}|{math}|{subproc}|{raw_word}|{squote}|{dquote}|{bquote}|{expand})
+word={expand}{-worditemex}+|{-worditem}{-worditemex}*
+
+word2=({glob}|{redir}|{ml}|{var}|{math}|{subproc}|{raw_word}|{squote}|{dquote}|{bquote})
+
 ending=(&&?|\|[\|&]?|;|\n|$)
 fd_from=[0-9]+
 fd_to=&[0-9]+
@@ -64,9 +71,350 @@ ml=<< {ident}
 math=\$\(\((\)[^)]|[^)])*\)\)
 subproc=\$\(( {cmd})* \)
 cmd=(( {word})+( {ending}|)|{ending})
+glob=\?|\*|\[.-.\]
+expand=[\{,\}]
 whole_cmd=( {func}|{cmd})* $
 """
 pp,_ = parse_peg_src(grammar)
+
+class WordIter:
+    def __init__(self, a):
+        self.a = a
+        self.index = -1
+        self.iter = 1
+        self.s = ""
+        self.is_glob = False
+        self.c = None
+
+    def copy(self, w):
+        self.a = w.a
+        self.index = w.index
+        self.iter = w.iter
+        self.s = w.s
+        self.is_glob = w.is_glob
+        self.c = w.c
+
+    def __repr__(self):
+        return f"{self.index}/{len(self.a)} i={self.iter}/{len(self.s)} s='{self.s}'"
+
+    def sets(self):
+        if isinstance(self.a[self.index],Group):
+            self.is_glob = True
+            self.s = self.a[self.index].substring()
+        else:
+            self.is_glob = False
+            self.s = self.a[self.index]
+            assert type(self.s) == str
+
+    def decr(self):
+        assert self.iter > 0
+        self.iter -= 1
+
+    def incr(self):
+        while True:
+            if self.iter >= len(self.s):
+                if self.index+1 < len(self.a):
+                    self.index += 1
+                    self.iter = 0
+                    self.sets()
+                    continue
+                else:
+                    here('-Done2-')
+                    return False
+            self.c = self.s[self.iter]
+            self.iter += 1
+            here("-Iter-")
+            return True
+
+        if self.index >= len(self.a):
+            here("-Done-")
+            return False
+
+
+def deglobw(w,j=0):
+    files = None
+    while w.incr():
+        here(files)
+        if not w.is_glob:
+            if files is None:
+                if w.c == '/':
+                    files = os.listdir('/') + ["."] + [".."]
+                    for f in range(len(files)):
+                        files = "/" + files[f]
+                else:
+                    files = os.listdir('.') + ["."] + [".."]
+            here(files)
+            new_files = []
+            delj = 0
+            for f in files:
+                if j < len(f) and f[j] == w.c:
+                    delj = 1
+                    new_files += [f]
+                elif w.c == '/' and len(f) == j:
+                    for k in os.listdir(f):
+                        new_files += [f+'/'+k]
+                    w.decr()
+            j += delj
+            files = new_files
+        elif w.c == '?':
+            new_files = []
+            delj = 0
+            for k in files:
+                if j < len(k):
+                    delj = 1
+                    new_files += [k]
+            here("j:",j,delj)
+            j += delj
+            files = new_files
+        elif w.c == '*':
+            if not w.incr():
+                return files
+            else:
+                w.decr()
+        else:
+            here()
+            files = []
+            break
+    here('fin')
+    if w.incr():
+        here()
+        files = []
+    new_files = []
+    for f in files:
+        if j == len(f):
+            new_files += [f]
+    files = new_files
+    return files
+
+def deglob(a):
+
+    assert type(a) == list
+    has_glob = False
+    for k in a:
+        if isinstance(k, Group):
+            has_glob = True
+    if not has_glob:
+        return a
+
+    s = []
+    raw = ''
+    for k in a:
+        if isinstance(k,Group) and k.is_("glob"):
+            ks = k.substring()
+            s += [("g"+ks,k)]
+            raw += ks
+        elif isinstance(k,Group) and k.is_("expand"):
+            here("remove this")
+            #ks = k.substring()
+            #for c in ks:
+            #    s += [(c,)]
+            #raw += ks
+        elif type(k) == str:
+            for c in k:
+                s += [(c,)]
+            raw += k
+        else:
+            assert False
+    files = fmatch(None, s, i1=0, i2=0)
+    if len(files) == 0:
+        return [raw]
+    else:
+        return files
+
+def deglob__(a):
+    assert type(a) == list
+    has_glob = False
+    for k in a:
+        if isinstance(k, Group):
+            has_glob = True
+    if not has_glob:
+        return a
+    w = WordIter(a)
+    print("*" * 20)
+    while w.incr():
+        here("w.c:",w.c,"w.is_glob:",w.is_glob)
+    print("*" * 20)
+    w = WordIter(a)
+    files = deglobw(w)
+    for f in files:
+        print(colored("->","green"),f)
+    here("done")
+    exit(0)
+
+def deglob_(a):
+    assert type(a) == list
+    has_glob = False
+    for k in a:
+        if isinstance(k, Group):
+            has_glob = True
+    if not has_glob:
+        return a
+    raw = ''
+    s = r'^'
+    for k in a:
+        if isinstance(k, Group):
+            ss = k.substring()
+            raw += ss
+            if ss == "*":
+                s += ".*"
+            elif ss == "?":
+                s += ".?"
+            elif ss[0] == '[':
+                s += ss
+            elif ss[0] == '{':
+                s += "(" + ss[1:-1].replace(",","|") + ")"
+            else:
+                assert False
+        elif type(k) == str:
+            raw += k
+            for c in k:
+                if re.match(r'^[a-zA-Z0-9_]$', c):
+                    s += c
+                else:
+                    s += '\\'+c
+        else:
+            assert False
+    s += '$'
+    res = []
+    for f in os.listdir('.'):
+        if re.match(s, f):
+            res += [f]
+    if len(res) == 0:
+        return [raw]
+    return res
+
+class Expando:
+    def __init__(self):
+        self.a = [[]]
+        self.parent = None
+
+    def start_new_list(self):
+        e = Expando()
+        e.parent = self
+        self.a[-1] += [e]
+        return e
+
+    def start_new_alternate(self):
+        self.a += [[]]
+
+    def end_list(self):
+        return self.parent
+
+    def add_item(self, item):
+        self.a[-1] += [item]
+
+    def __repr__(self):
+        return "Expando("+str(self.a)+")"
+
+    def build_strs(self):
+        streams = [a for a in self.a]
+        final_streams = []
+        show = False
+        while len(streams) > 0:
+            new_streams = []
+            for stream in streams:
+                found = False
+                for i in range(len(stream)):
+                    item = stream[i]
+                    if isinstance(item,Expando):
+                        found = True
+                        show = True
+                        for a in item.a:
+                            new_stream = stream[:i]+a+stream[i+1:]
+                            new_streams += [new_stream]
+                        break
+                if not found:
+                    final_streams += [stream]
+            streams = new_streams
+        return final_streams
+            
+def expand1(a,ex=None,i=0,sub=0):
+    if ex is None:
+        ex = Expando()
+    sub = 0
+    for i in range(len(a)):
+        if isinstance(a[i], Group) and a[i].is_("expand"):
+            if a[i].substring() == "{":
+                ex = ex.start_new_list()
+            elif a[i].substring() == '}':
+                ex = ex.end_list()
+            elif a[i].substring() == ',':
+                ex.start_new_alternate()
+            else:
+                ex.add_item(a[i])
+        else:
+            ex.add_item(a[i])
+    return ex
+
+def expand(a,i=0,sub=False):
+    items = []
+    streams = []
+    while i < len(a):
+        if isinstance(a[i], Group) and a[i].is_("expand"):
+            if a[i].substring() == "{":
+                sub_streams = expand(a,i+1,True)
+                new_streams = [] + streams
+                for s2 in sub_streams:
+                    new_streams += [items + s2]
+                return new_streams
+            elif a[i].substring() == ",":
+                if sub:
+                    streams += [items]
+                    items = []
+                else:
+                    items += [","]
+            elif a[i].substring() == "}":
+                if sub:
+                    pass #return streams + [items]
+                else:
+                    items += ["}"]
+        else:
+            items += [a[i]]
+        i += 1
+    return streams + [items]
+
+def fmatch(fn,pat,i1=0,i2=0):
+    while True:
+        if fn is None:
+            result = []
+            if pat[0] == ('/',):
+                for d in os.listdir(fp):
+                    result += fmatch('/'+d, pat, 1, 1)
+            else:
+                for d in os.listdir('.'):
+                    result += fmatch(d, pat, 0, 0)
+            return result
+        elif i2 == len(pat) and i1 == len(fn):
+            return [fn]
+        elif i1 == len(fn) and pat[i2] == ('/',):
+            dd = []
+            for k in os.listdir(fn):
+                ff = os.path.join(fn,k)
+                if i1 <= len(ff):
+                    dd += fmatch(os.path.join(fn,k), pat, i1, i2)
+            return dd
+        elif i2 >= len(pat):
+            return []
+        elif pat[i2][0] == 'g?':
+            i1 += 1
+            i2 += 1
+        elif pat[i2][0] == 'g*':
+            if i2+1 <= len(pat):
+                result = fmatch(fn, pat, i1, i2+1)
+            else:
+                restult = []
+            if i1+1 <= len(fn):
+                if len(result) == 0:
+                    result = fmatch(fn, pat, i1+1, i2+1)
+                if len(result) == 0:
+                    result = fmatch(fn, pat, i1+1, i2)
+            return result
+        elif i1 < len(fn) and i2 < len(pat) and (fn[i1],) == pat[i2]:
+            i1 += 1
+            i2 += 1
+        else:
+            return []
+
 
 def cat(a, b):
     assert type(a) == list
@@ -108,14 +456,19 @@ class shell:
             for k in gr.children:
                 if not k.is_("ending"):
                     ek = self.eval(k)
-                    #here(ek)
-                    #cat(args, ek)
-                    if type(ek) == str:
-                        args += [ek]
-                    elif type(ek) == list:
-                        args += ek
-                    else:
-                        assert False
+                    #here(ek,k.dump())
+                    exk = expand1(ek).build_strs()
+                    #here("ex=>",str(ex1))
+                    #here("bs=",ex1.build_strs())
+                    #exk = expand(ek)
+                    for nek in exk:
+                        nek = deglob(nek)
+                        if type(nek) == str:
+                            args += [nek]
+                        elif type(nek) == list:
+                            args += ["".join(nek)]
+                        else:
+                            assert False
                     #here(args,k.dump())
             if len(args)==0:
                 return []
@@ -131,12 +484,15 @@ class shell:
                 self.vars["?"] = str(p.returncode)
                 return o
             return []
+        elif gr.is_("glob"):
+            return [gr]
+        elif gr.is_("expand"):
+            return [gr]
         elif gr.is_("word"):
             s = []
             for c in gr.children:
                 #s += self.eval(c)
                 cat(s, self.eval(c))
-            #here(s)
             return s #"".join(s)
         elif gr.is_("raw_word"):
             return [gr.substring()]
@@ -177,7 +533,11 @@ class shell:
                 return s[1]
         elif gr.is_("var"):
             v = re.split(r'\s+', self.vars.get(gr.substring()[1:], ""))
-            #here(v)
+            here("v:",v)
+            here("gr:",gr.dump())
+            if len(gr.children) > 0 and gr.children[0].is_("unset_raw"):
+                v = self.eval(gr.children[1])
+                here("v:",v)
             return v
         else:
             here(gr.dump())
@@ -193,7 +553,7 @@ class shell:
         print(colored(txt,"cyan"))
         m = Matcher(pp, "whole_cmd", txt)
         if m.matches():
-            #here(m.gr.dump())
+            # here(m.gr.dump())
             if verbose:
                 print(colored(txt,"cyan"))
                 print(colored(m.gr.dump(),"magenta"))
@@ -206,14 +566,21 @@ class shell:
             return "EVAL"
         elif m.maxTextPos == len(txt):
             self.txt = txt
+            print()
+            m.showError()
+            print("continue...")
             return "CONTNUE"
         else:
             self.txt = ''
+            print()
             m.showError()
-            m.showError(sys.stderr)
+            #m.showError(sys.stderr)
+            here("done")
+            exit(0)
             return "SYNTAX"
 
 s = shell()
+s.run_text("echo {a,b{c,d}}{e,f}")
 s.run_text('if [ a = b ]; then echo $HOME; fi;')
 s.run_text('''
 for x in 1 2 3
@@ -222,6 +589,8 @@ do
 done
 '''.strip()+"\n")
 s.run_text('echo ${b-date}')
+s.run_text('echo aaa ${b:-date}')
+s.run_text('echo aaa ${b:-$(date)"y"$q}')
 s.run_text('echo ${b:-$(date)"y"$q}"x"')
 s.run_text('echo ${date%.cpp}')
 s.run_text('''echo hello 2>&1''')
@@ -243,3 +612,14 @@ foo''')
 s.run_text('python3 ./x.py a b c')
 s.vars['q'] = "a b c"
 s.run_text('python3 ./x.py $q')
+s.run_text('ls x*')
+s.run_text('ls a*')
+s.run_text('ls x.{py,sh}')
+s.run_text('''
+function zap() {
+  echo x.{py,sh}
+}
+zap
+''')
+s.run_text("echo {a,b{c,d}}")
+here("All tests passed")
