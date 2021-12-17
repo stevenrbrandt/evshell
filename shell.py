@@ -53,7 +53,7 @@ unset_raw=-
 rm_front=\#\#?
 rm_back=%%?
 w=[a-zA-Z0-9_]+
-var=\$({-w}|\{({-w}({unset}{word2}+|{unset_raw}{raw_word}|{rm_front}{word2}|{rm_back}{word2}|))\})
+var=\$({-w}|\{({-w}({unset}{words2}|{unset_raw}{raw_word}|{rm_front}{word2}|{rm_back}{word2}|))\})
 func=function {ident} \( \) \{( {cmd})* \}[ \t]*\n
 
 worditem=({glob}|{redir}|{ml}|{var}|{math}|{subproc}|{raw_word}|{squote}|{dquote}|{bquote})
@@ -61,6 +61,7 @@ worditemex=({glob}|{redir}|{ml}|{var}|{math}|{subproc}|{raw_word}|{squote}|{dquo
 word={expand}{-worditemex}+|{-worditem}{-worditemex}*
 
 word2=({glob}|{redir}|{ml}|{var}|{math}|{subproc}|{raw_word}|{squote}|{dquote}|{bquote})
+words2={word2}+
 
 ending=(&&?|\|[\|&]?|;|\n|$)
 fd_from=[0-9]+
@@ -430,13 +431,16 @@ def cat(a, b):
 
 class shell:
     
-    def __init__(self):
+    def __init__(self,stdout = sys.stdout, stderr = sys.stderr):
         self.txt = ""
         self.vars = {"?":"0", "*":" ".join(sys.argv[2:])}
-        self.stdout = sys.stdout
-        self.stderr = sys.stderr
-        self.if_stack = []
+        self.stdout = stdout
+        self.stderr = stderr
+        self.lines = []
+        self.stack = []
         self.funcs = {}
+        self.output = ""
+        self.error = ""
 
     def eval(self, gr):
         r = self.eval_(gr)
@@ -477,10 +481,16 @@ class shell:
                     self.eval(c)
                 return []
             elif args[0] not in ["if","then","else","fi","for","do","done"]:
+                if args[0] == "if":
+                    self.stack += [("if",line)]
                 sout = self.stdout
                 serr = self.stderr
                 p = Popen(args, stdout=sout, stderr=serr, universal_newlines=True)
                 o, e = p.communicate("")
+                if type(o) == str:
+                    self.output += o
+                if type(e) == str:
+                    self.error += e
                 self.vars["?"] = str(p.returncode)
                 return o
             return []
@@ -488,7 +498,7 @@ class shell:
             return [gr]
         elif gr.is_("expand"):
             return [gr]
-        elif gr.is_("word"):
+        elif gr.is_("word") or gr.is_("word2") or gr.is_("words2"):
             s = []
             for c in gr.children:
                 #s += self.eval(c)
@@ -506,11 +516,14 @@ class shell:
             self.funcs[ident] = gr.children[1:]
         elif gr.is_("subproc"):
             result = ""
+            o,e = self.output, self.error
             for c in gr.children:
                 save = self.stdout
                 self.stdout = PIPE
+                self.output, self.error = "", ""
                 result = self.eval(c)
                 self.stdout = save
+            self.output, self.error = o, e
             return result.strip()
         elif gr.is_("dquote"):
             s = ""
@@ -532,13 +545,23 @@ class shell:
             else:
                 return s[1]
         elif gr.is_("var"):
-            v = re.split(r'\s+', self.vars.get(gr.substring()[1:], ""))
-            here("v:",v)
-            here("gr:",gr.dump())
-            if len(gr.children) > 0 and gr.children[0].is_("unset_raw"):
+            varname = gr.substring()[1:]
+            if varname in self.vars:
+                v = re.split(r'\s+', self.vars[varname])
+            else:
+                v = None
+
+            if v is None and gr.has(0,"unset") != False:
+                here("all:",gr.children[1].dump())
                 v = self.eval(gr.children[1])
                 here("v:",v)
-            return v
+            elif v is None and gr.has(0,"unset_raw"): #len(gr.children) > 0 and gr.children[0].is_("unset_raw"):
+                v = self.eval(gr.children[1])
+
+            if v is None:
+                return ""
+            else:
+                return v
         else:
             here(gr.dump())
             return [gr.substring()]
@@ -562,6 +585,7 @@ class shell:
             if len(txt2)>0:
                 s.run_text(txt2)
             self.txt = ''
+            self.lines += [m.gr]
             self.eval(m.gr)
             return "EVAL"
         elif m.maxTextPos == len(txt):
@@ -580,7 +604,20 @@ class shell:
             return "SYNTAX"
 
 s = shell()
-s.run_text("echo {a,b{c,d}}{e,f}")
+
+def test(cmd):
+    print(colored("TEST","blue"))
+    s.stdout = PIPE
+    s.output = ""
+    s.run_text(cmd)
+    p = Popen(["bash","-c",cmd],universal_newlines=True,stdout=PIPE,stderr=PIPE)
+    o, e = p.communicate()
+    print("   bash:",colored(o,"green"),end='')
+    print("piebash:",colored(s.output,"magenta"),end='')
+    assert o == s.output
+    assert e == s.error
+
+test("echo {a,b{c,d}}{e,f}")
 s.run_text('if [ a = b ]; then echo $HOME; fi;')
 s.run_text('''
 for x in 1 2 3
@@ -588,9 +625,9 @@ do
   echo $x
 done
 '''.strip()+"\n")
-s.run_text('echo ${b-date}')
-s.run_text('echo aaa ${b:-date}')
-s.run_text('echo aaa ${b:-$(date)"y"$q}')
+test('echo ${b-date}')
+test('echo aaa ${b:-date}')
+test('echo aaa ${b:-$(date)"y"$q}')
 s.run_text('echo ${b:-$(date)"y"$q}"x"')
 s.run_text('echo ${date%.cpp}')
 s.run_text('''echo hello 2>&1''')
@@ -621,5 +658,6 @@ function zap() {
 }
 zap
 ''')
-s.run_text("echo {a,b{c,d}}")
+test("echo {a,b{c,d}}")
+s.run_text("if [ 1 = 0 ]; then echo true; else echo false; fi")
 here("All tests passed")
