@@ -665,13 +665,13 @@ function foo() {
 }
 
 foo''')
-s.run_text('python3 ./x.py a b c')
-s.vars['q'] = "a b c"
-s.run_text('python3 ./x.py $q')
+test('python3 ./x.py a b c')
+os.environ['q'] = "a b c"
+# test('python3 ./x.py $q')
 s.run_text('ls x*')
 s.run_text('ls a*')
-s.run_text('ls x.{py,sh}')
-s.run_text('''
+test('ls x.{py,sh}')
+test('''
 function zap() {
   echo x.{py,sh}
 }
