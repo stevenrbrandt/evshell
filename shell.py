@@ -53,7 +53,7 @@ unset_raw=-
 rm_front=\#\#?
 rm_back=%%?
 w=[a-zA-Z0-9_]+
-var=\$({-w}|\{({-w}({unset}{words2}|{unset_raw}{raw_word}|{rm_front}{word2}|{rm_back}{word2}|))\})
+var=\$({w}|\{({w}({unset}{words2}|{unset_raw}{raw_word}|{rm_front}{word2}|{rm_back}{word2}|))\})
 func=function {ident} \( \) \{( {cmd})* \}[ \t]*\n
 
 worditem=({glob}|{redir}|{ml}|{var}|{math}|{subproc}|{raw_word}|{squote}|{dquote}|{bquote})
@@ -458,7 +458,7 @@ class shell:
         elif gr.is_("cmd"):
             args = []
             for k in gr.children:
-                if not k.is_("ending"):
+                if not k.is_("ending") and not k.has(0,"redir"):
                     ek = self.eval(k)
                     #here(ek,k.dump())
                     exk = expand1(ek).build_strs()
@@ -545,25 +545,42 @@ class shell:
             else:
                 return s[1]
         elif gr.is_("var"):
-            varname = gr.substring()[1:]
+            varname = gr.has(0,"w").substring()
             if varname in self.vars:
                 v = re.split(r'\s+', self.vars[varname])
+            elif varname in os.environ:
+                v = re.split(r'\s+', os.environ[varname])
             else:
                 v = None
 
-            if v is None and gr.has(0,"unset") != False:
-                here("all:",gr.children[1].dump())
-                v = self.eval(gr.children[1])
-                here("v:",v)
-            elif v is None and gr.has(0,"unset_raw"): #len(gr.children) > 0 and gr.children[0].is_("unset_raw"):
-                v = self.eval(gr.children[1])
+            if v is None and gr.has(1,"unset") != False:
+                v = self.eval(gr.children[2])
+            elif v is None and gr.has(1,"unset_raw"):
+                v = self.eval(gr.children[2])
+            rmb = gr.has(1,"rm_back")
+            if rmb != False:
+                back = gr.children[2].substring()
+                if len(v) > 0 and v[0].endswith(back):
+                    v[0] = v[0][:-len(back)]
 
             if v is None:
                 return ""
             else:
                 return v
+        elif gr.has(0,"fd_from") != False and gr.has(1,"fd_to") != False:
+            fd_from = gr.children[0].substring()
+            fd_to = gr.children[1].substring()
+            if fd_from == "2" and fd_to == "&1":
+                self.stderr = self.stdout
+                return None
+            elif fd_from == "1" and fd_to == "&2":
+                self.stdout = self.stderr
+                return None
+            else:
+                raise Exception(f"{fd_from} and {fd_to}")
         else:
             here(gr.dump())
+            raise Exception(gr.substring())
             return [gr.substring()]
 
     def run_text(self,txt):
@@ -612,10 +629,10 @@ def test(cmd):
     s.run_text(cmd)
     p = Popen(["bash","-c",cmd],universal_newlines=True,stdout=PIPE,stderr=PIPE)
     o, e = p.communicate()
-    print("   bash:",colored(o,"green"),end='')
-    print("piebash:",colored(s.output,"magenta"),end='')
+    print("   bash: (",colored(re.sub(r'\n',r'\\n',o),"green"),")",sep='')
+    print("piebash: (",colored(re.sub(r'\n',r'\\n',s.output),"magenta"),")",sep='')
     assert o == s.output
-    assert e == s.error
+    assert e == s.error, f"<{e}> != <{s.error}>"
 
 test("echo {a,b{c,d}}{e,f}")
 s.run_text('if [ a = b ]; then echo $HOME; fi;')
@@ -627,10 +644,12 @@ done
 '''.strip()+"\n")
 test('echo ${b-date}')
 test('echo aaa ${b:-date}')
-test('echo aaa ${b:-$(date)"y"$q}')
-s.run_text('echo ${b:-$(date)"y"$q}"x"')
-s.run_text('echo ${date%.cpp}')
-s.run_text('''echo hello 2>&1''')
+test('echo aaa ${b:-$(date +%m-%d-%Y)"y"$q}')
+test('echo ${b:-$(date +%m-%d-%Y)"y"$q}"x"')
+os.environ["date"]="foo.cpp"
+s.vars["date"]="foo.cpp"
+test('echo ${date%.cpp}')
+test('''echo hello 2>&1''')
 
 s.run_text('echo "hello ')
 s.run_text('world"')
