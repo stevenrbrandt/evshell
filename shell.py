@@ -463,8 +463,15 @@ class shell:
     def eval_(self, gr):
         if gr.is_("whole_cmd"):
             result = []
+            ending = ""
             for c in gr.children:
+                if ending == "&&" and self.vars["?"] != "0":
+                    continue
+                elif ending == "||" and self.vars["?"] == "0":
+                    continue
                 result = self.eval(c)
+                if c.has(-1,"ending") != False:
+                    ending = c.has(-1).substring()
             return result
         elif gr.is_("cmd"):
             args = []
@@ -483,11 +490,11 @@ class shell:
                         elif type(nek) == list:
                             #args += ["".join(nek)]
                             args += [""]
-                            for k in nek:
-                                if isinstance(k,Space):
+                            for kk in nek:
+                                if isinstance(kk,Space):
                                     args += [""]
                                 else:
-                                    args[-1] += k
+                                    args[-1] += kk
                         else:
                             assert False
                     #here(args,k.dump())
@@ -502,7 +509,25 @@ class shell:
                     self.stack += [("if",line)]
                 sout = self.stdout
                 serr = self.stderr
-                p = Popen(args, stdout=sout, stderr=serr, universal_newlines=True)
+                if not os.path.exists(args[0]):
+                    for path in os.environ.get("PATH",".").split(":"):
+                        full_path = os.path.join(path, args[0])
+                        if os.path.exists(full_path):
+                            args[0] = full_path
+                            break
+                if os.path.exists(args[0]):
+                    try:
+                        with open(args[0],"r") as fd:
+                            first_line = fd.readline()
+                            if first_line.startswith("#!"):
+                                args = re.split(r'\s+',first_line[2:].strip()) + args
+                    except:
+                        pass
+                try:
+                    p = Popen(args, stdout=sout, stderr=serr, universal_newlines=True)
+                except OSError as e:
+                    args = ["/bin/sh"]+args
+                    p = Popen(args, stdout=sout, stderr=serr, universal_newlines=True)
                 o, e = p.communicate("")
                 if type(o) == str:
                     self.output += o
@@ -510,6 +535,8 @@ class shell:
                     self.error += e
                 self.vars["?"] = str(p.returncode)
                 return o
+            if k.is_("ending"):
+                print("ENDING:",k.dump())
             return []
         elif gr.is_("glob"):
             return [gr]
@@ -704,5 +731,10 @@ zap
 ''')
 test("echo {a,b{c,d}}")
 test("echo x*")
-s.run_text("if [ 1 = 0 ]; then echo true; else echo false; fi")
+#test("if [ 1 = 0 ]; then echo true; else echo false; fi")
+test("./a.sh")
+test("./a.sh && ./b.sh")
+test("./a.sh || ./b.sh")
+test("./b.sh && ./a.sh")
+test("./b.sh || ./a.sh")
 here("All tests passed")
