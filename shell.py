@@ -541,13 +541,20 @@ class shell:
                 result = self.eval(c)
                 self.stdout = save
             self.output, self.error = o, e
-            return result.strip()
+            return spaceout(re.split(r'\s+',result.strip()))
         elif gr.is_("dquote"):
             s = ""
             for c in gr.children:
                 r = self.eval(c)
-                assert type(r) == str, "r=%s %s" % (r, c.dump())
-                s += r
+                if type(r) == str:
+                    s += r
+                else:
+                    assert type(r) == list, "t=%s r=%s %s" % (type(r), r, c.dump())
+                    for k in r:
+                        if isinstance(k,Space):
+                            s += ' '
+                        else:
+                            s += k
             assert type(s) == str
             #here("s=",s)
             return s
@@ -685,6 +692,7 @@ foo''')
 test('python3 ./x.py a b c')
 os.environ['q'] = "a b c"
 test('python3 ./x.py $q')
+test('echo $(seq 1 10)')
 s.run_text('ls x*')
 s.run_text('ls a*')
 test('ls x.{py,sh}')
