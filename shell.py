@@ -131,6 +131,17 @@ class WordIter:
             here("-Done-")
             return False
 
+class Space:
+    def __repr__(self):
+        return " "
+
+def spaceout(a):
+    b = []
+    for i in range(len(a)):
+        if i > 0:
+            b += [Space()]
+        b += [a[i]]
+    return b
 
 def deglobw(w,j=0):
     files = None
@@ -470,7 +481,13 @@ class shell:
                         if type(nek) == str:
                             args += [nek]
                         elif type(nek) == list:
-                            args += ["".join(nek)]
+                            #args += ["".join(nek)]
+                            args += [""]
+                            for k in nek:
+                                if isinstance(k,Space):
+                                    args += [""]
+                                else:
+                                    args[-1] += k
                         else:
                             assert False
                     #here(args,k.dump())
@@ -546,10 +563,10 @@ class shell:
                 return s[1]
         elif gr.is_("var"):
             varname = gr.has(0,"w").substring()
-            if varname in self.vars:
-                v = re.split(r'\s+', self.vars[varname])
-            elif varname in os.environ:
-                v = re.split(r'\s+', os.environ[varname])
+            if varname in os.environ:
+                v = spaceout(re.split(r'\s+', os.environ[varname]))
+            elif varname in self.vars:
+                v = spaceout(re.split(r'\s+', self.vars[varname]))
             else:
                 v = None
 
@@ -667,7 +684,7 @@ function foo() {
 foo''')
 test('python3 ./x.py a b c')
 os.environ['q'] = "a b c"
-# test('python3 ./x.py $q')
+test('python3 ./x.py $q')
 s.run_text('ls x*')
 s.run_text('ls a*')
 test('ls x.{py,sh}')
