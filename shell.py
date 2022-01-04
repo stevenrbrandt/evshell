@@ -231,7 +231,7 @@ def deglob(a):
     if len(files) == 0:
         return [raw]
     else:
-        return files
+        return spaceout(files)
 
 def deglob__(a):
     assert type(a) == list
@@ -703,5 +703,6 @@ function zap() {
 zap
 ''')
 test("echo {a,b{c,d}}")
+test("echo x*")
 s.run_text("if [ 1 = 0 ]; then echo true; else echo false; fi")
 here("All tests passed")
