@@ -462,6 +462,7 @@ class shell:
 
     def eval_(self, gr):
         if gr.is_("whole_cmd"):
+            here("wc:",gr.dump())
             result = []
             ending = ""
             for c in gr.children:
@@ -470,11 +471,12 @@ class shell:
                 elif ending == "||" and self.vars["?"] == "0":
                     continue
                 result = self.eval(c)
-                if c.has(-1,"ending") != False:
+                if c.has(-1,"ending"):
                     ending = c.has(-1).substring()
             return result
         elif gr.is_("cmd"):
             args = []
+            # yyy
             for k in gr.children:
                 if not k.is_("ending") and not k.has(0,"redir"):
                     ek = self.eval(k)
@@ -604,12 +606,12 @@ class shell:
             else:
                 v = None
 
-            if v is None and gr.has(1,"unset") != False:
+            if v is None and gr.has(1,"unset"):
                 v = self.eval(gr.children[2])
             elif v is None and gr.has(1,"unset_raw"):
                 v = self.eval(gr.children[2])
             rmb = gr.has(1,"rm_back")
-            if rmb != False:
+            if rmb:
                 back = gr.children[2].substring()
                 if len(v) > 0 and v[0].endswith(back):
                     v[0] = v[0][:-len(back)]
@@ -618,7 +620,7 @@ class shell:
                 return ""
             else:
                 return v
-        elif gr.has(0,"fd_from") != False and gr.has(1,"fd_to") != False:
+        elif gr.has(0,"fd_from") and gr.has(1,"fd_to"):
             fd_from = gr.children[0].substring()
             fd_to = gr.children[1].substring()
             if fd_from == "2" and fd_to == "&1":
@@ -685,6 +687,7 @@ def test(cmd):
     assert o == s.output
     assert e == s.error, f"<{e}> != <{s.error}>"
 
+#test("if [ 1 = 0 ]; then echo true; else echo false; fi")
 test("echo {a,b{c,d}}{e,f}")
 s.run_text('if [ a = b ]; then echo $HOME; fi;')
 s.run_text('''
@@ -731,7 +734,6 @@ zap
 ''')
 test("echo {a,b{c,d}}")
 test("echo x*")
-#test("if [ 1 = 0 ]; then echo true; else echo false; fi")
 test("./a.sh")
 test("./a.sh && ./b.sh")
 test("./a.sh || ./b.sh")

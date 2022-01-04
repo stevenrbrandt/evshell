@@ -480,7 +480,7 @@ class Group:
       if nm is not None:
         m = ref.name
         if m != nm:
-            return False
+            return None 
       return ref
 
     def is_(self,nm):
