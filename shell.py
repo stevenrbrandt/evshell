@@ -27,6 +27,36 @@ sys.stderr.flush()
 
 my_shell = os.path.realpath(sys.argv[0])
 
+Never = object()
+
+class TFN:
+
+    def __init__(self, b):
+        if b in [True, False]:
+            self.b = b
+        elif b == "True":
+            self.b = True
+        elif b == "False":
+            self.b = False
+        else:
+            self.b = Never
+
+    def toggle(self):
+        if self.b == True:
+            self.b = False
+        elif self.b == False:
+            self.b = True
+        elif self.b == Never:
+            pass
+        else:
+            raise Exception("bad state")
+
+    def __bool__(self):
+        if self.b in [True, False]:
+            return self.b
+        else:
+            return False
+
 def unesc(s):
     s2 = ""
     i = 0
@@ -515,38 +545,49 @@ class shell:
                     #here(args,k.dump())
 
             if len(args)>0:
-                if args[0] == "if":
-                    endmark = None
-                    if gr.Has(-1,"ending").StrEq(0,"if").StrEq(1,"[").StrEq(-2,"]").Has(-1,"ending").eval():
-                        endmark = -2
-                    elif gr.StrEq(0,"if").StrEq(1,"[").StrEq(-1,"]").eval():
-                        endmark = -1
-                    elif gr.Has(-1,"ending").StrEq(0,"if").StrEq(1,"[[").StrEq(-2,"]]").Has(-1,"ending").eval():
-                        endmark = -2
-                    elif gr.StrEq(0,"if").StrEq(1,"[[").StrEq(-1,"]]").eval():
-                        endmark = -1
-        
-                    if endmark and gr.groupCount() + endmark == 5:
-                        testresult = 0
-                        op = unesc(gr.has(3).substring())
-                        if op == "=":
-                            testresult = (gr.has(2).substring() == gr.has(4).substring())
-                        elif op == "!=":
-                            testresult = (gr.has(2).substring() != gr.has(4).substring())
-                        elif op == "<":
-                            testresult = (float(gr.has(2).substring()) < float(gr.has(4).substring()))
-                        elif op == ">":
-                            testresult = (float(gr.has(2).substring()) > float(gr.has(4).substring()))
-                        else:
-                            raise Exception(op)
 
-                    self.stack += [("if",testresult)]
-                    skip = True
-                elif args[0] == "then":
+                if args[0] == "then":
                     args = args[1:]
+
                 elif args[0] == "else":
                     args = args[1:]
-                    self.stack[-1] = (self.stack[-1][0], not self.stack[-1][1])
+                    self.stack[-1][1].toggle()
+
+                if args[0] == "if":
+                    if len(self.stack) > 0 and not self.stack[-1][1]:
+                        self.stack += [("if",TFN(Never))]
+                    else:
+                        endmark = None
+                        # if [ a = b ] ;
+                        #  7 6 5 4 3 2 1
+                        # if [ a = b ] 
+                        #  6 5 4 3 2 1 
+                        if gr.Has(-1,"ending").StrEq(-7,"if").StrEq(-6,"[").StrEq(-2,"]").Has(-1,"ending").eval():
+                            endmark = -2
+                        elif gr.StrEq(-6,"if").StrEq(-5,"[").StrEq(-1,"]").eval():
+                            endmark = -1
+                        elif gr.Has(-1,"ending").StrEq(-7,"if").StrEq(-6,"[[").StrEq(-2,"]]").Has(-1,"ending").eval():
+                            endmark = -2
+                        elif gr.StrEq(-6,"if").StrEq(-5,"[[").StrEq(-1,"]]").eval():
+                            endmark = -1
+            
+                        if endmark is not None:
+                            testresult = 0
+                            op = unesc(gr.has(endmark-2).substring())
+                            arg1 = gr.has(endmark-3)
+                            arg2 = gr.has(endmark-1)
+                            if op == "=":
+                                testresult = (arg1.substring() == arg2.substring())
+                            elif op == "!=":
+                                testresult = (arg1.substring() != arg2.substring())
+                            elif op == "<":
+                                testresult = (float(arg1.substring()) < float(arg2.substring()))
+                            elif op == ">":
+                                testresult = (float(arg1.substring()) > float(arg2.substring()))
+                            else:
+                                raise Exception(op)
+
+                        self.stack += [("if",TFN(testresult))]
                 elif args[0] == "fi":
                     self.stack = self.stack[:-1]
             if len(self.stack) > 0:
@@ -738,6 +779,9 @@ def test(cmd):
     assert o == s.output
     assert e == s.error, f"<{e}> != <{s.error}>"
 
+test("if [ 1 = 0 ]; then echo true; else echo false; fi")
+test("if [ 0 = 0 ]; then echo true; else if [ 1 = 0 ]; then echo false; fi; fi")
+test("if [ 0 = 1 ]; then echo true; else if [ 1 = 0 ]; then echo false; fi; fi")
 test("if [ 1 = 0 ]; then echo true; else echo false; fi")
 test("if [ 1 \\> 0 ]; then echo true; else echo false; fi")
 test("if [ 1 \\< 0 ]; then echo true; else echo false; fi")
