@@ -457,13 +457,25 @@ class Dot:
     def __init__(self):
         pass
 
+class Empty:
+    def Has(self,a,b=None):
+        return self
+    def StrEq(self,a,b=None):
+        return self
+    def eval(self):
+        return False
+
+empty = Empty()
+
 class Group:
     # This class represents a node in the
     # parse tree.
+    def eval(self):
+        return True
 
     def group(self,n,nm=None):
       if n < 0:
-        n += self.groupCount()+1+n
+        n += self.groupCount()
       ref = self.children[n]
       if nm is not None:
         m = ref.name
@@ -473,15 +485,39 @@ class Group:
 
     def has(self,n,nm=None):
       if n < 0:
-        n += self.groupCount()+1+n
+        n += self.groupCount()
       if n < 0 or n >= len(self.children):
-        return False
+        return None
       ref = self.children[n]
       if nm is not None:
         m = ref.name
         if m != nm:
             return None 
       return ref
+
+    def Has(self,n,nm=None):
+      if n < 0:
+        n += self.groupCount()
+      if n < 0 or n >= len(self.children):
+        return empty
+      ref = self.children[n]
+      if nm is not None:
+        m = ref.name
+        if m != nm:
+            return empty
+      return self
+
+    def StrEq(self,n,nm=None):
+      if n < 0:
+        n += self.groupCount()
+      if n < 0 or n >= len(self.children):
+        return empty
+      ref = self.children[n]
+      if nm is not None:
+        m = ref.substring()
+        if m != nm:
+            return empty
+      return self
 
     def is_(self,nm):
       return self.name == nm

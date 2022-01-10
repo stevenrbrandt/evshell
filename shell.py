@@ -462,7 +462,7 @@ class shell:
 
     def eval_(self, gr):
         if gr.is_("whole_cmd"):
-            here("wc:",gr.dump())
+            #here("wc:",gr.dump())
             result = []
             ending = ""
             for c in gr.children:
@@ -476,7 +476,8 @@ class shell:
             return result
         elif gr.is_("cmd"):
             args = []
-            # yyy
+            skip = False
+
             for k in gr.children:
                 if not k.is_("ending") and not k.has(0,"redir"):
                     ek = self.eval(k)
@@ -500,6 +501,34 @@ class shell:
                         else:
                             assert False
                     #here(args,k.dump())
+
+            if len(args)>0:
+                if args[0] == "if":
+                    endmark = None
+                    if gr.Has(-1,"ending").StrEq(0,"if").StrEq(1,"[").StrEq(-2,"]").Has(-1,"ending").eval():
+                        endmark = -2
+                    elif gr.StrEq(0,"if").StrEq(1,"[").StrEq(-1,"]").eval():
+                        endmark = -1
+        
+                    if endmark and gr.groupCount() + endmark == 5:
+                        testresult = 0
+                        if gr.StrEq(3,"=").eval():
+                            testresult = (gr.has(2).substring() == gr.has(4).substring())
+                        elif gr.StrEq(3,"!=").eval():
+                            testresult = (gr.has(2).substring() != gr.has(4).substring())
+                    self.stack += [("if",testresult)]
+                    skip = True
+                elif args[0] == "then":
+                    args = args[1:]
+                elif args[0] == "else":
+                    args = args[1:]
+                    self.stack[-1] = (self.stack[-1][0], not self.stack[-1][1])
+                elif args[0] == "fi":
+                    self.stack = self.stack[:-1]
+            if len(self.stack) > 0:
+                skip = not self.stack[-1][1]
+            if skip:
+                return []
             if len(args)==0:
                 return []
             if args[0] in self.funcs:
@@ -507,8 +536,8 @@ class shell:
                     self.eval(c)
                 return []
             elif args[0] not in ["if","then","else","fi","for","do","done"]:
-                if args[0] == "if":
-                    self.stack += [("if",line)]
+                #if args[0] == "if":
+                #    self.stack += [("if",line)]
                 sout = self.stdout
                 serr = self.stderr
                 if not os.path.exists(args[0]):
@@ -537,8 +566,6 @@ class shell:
                     self.error += e
                 self.vars["?"] = str(p.returncode)
                 return o
-            if k.is_("ending"):
-                print("ENDING:",k.dump())
             return []
         elif gr.is_("glob"):
             return [gr]
@@ -687,7 +714,7 @@ def test(cmd):
     assert o == s.output
     assert e == s.error, f"<{e}> != <{s.error}>"
 
-#test("if [ 1 = 0 ]; then echo true; else echo false; fi")
+test("if [ 1 = 0 ]; then echo true; else echo false; fi")
 test("echo {a,b{c,d}}{e,f}")
 s.run_text('if [ a = b ]; then echo $HOME; fi;')
 s.run_text('''
