@@ -27,6 +27,18 @@ sys.stderr.flush()
 
 my_shell = os.path.realpath(sys.argv[0])
 
+def unesc(s):
+    s2 = ""
+    i = 0
+    while i < len(s):
+        if s[i] == '\\':
+            s2 += s[i+1]
+            i += 2
+        else:
+            s2 += s[i]
+            i += 1
+    return s2
+
 verbose = False
 
 sftp_default = "/usr/libexec/openssh/sftp-server"
@@ -42,7 +54,7 @@ else:
 
 grammar = r"""
 skipper=\b([ \t]|\\\n|\#.*)*
-raw_word=[^"'\t \n\$\#&\|;{}`()<>?*,]+
+raw_word=(\\.|[^\\"'\t \n\$\#&\|;{}`()<>?*,])+
 dchar=[^"$\\]
 dlit=\\.
 dquote="({dlit}|{dchar}|{var}|{math}|{subproc}|{bquote})*"
@@ -509,13 +521,25 @@ class shell:
                         endmark = -2
                     elif gr.StrEq(0,"if").StrEq(1,"[").StrEq(-1,"]").eval():
                         endmark = -1
+                    elif gr.Has(-1,"ending").StrEq(0,"if").StrEq(1,"[[").StrEq(-2,"]]").Has(-1,"ending").eval():
+                        endmark = -2
+                    elif gr.StrEq(0,"if").StrEq(1,"[[").StrEq(-1,"]]").eval():
+                        endmark = -1
         
                     if endmark and gr.groupCount() + endmark == 5:
                         testresult = 0
-                        if gr.StrEq(3,"=").eval():
+                        op = unesc(gr.has(3).substring())
+                        if op == "=":
                             testresult = (gr.has(2).substring() == gr.has(4).substring())
-                        elif gr.StrEq(3,"!=").eval():
+                        elif op == "!=":
                             testresult = (gr.has(2).substring() != gr.has(4).substring())
+                        elif op == "<":
+                            testresult = (float(gr.has(2).substring()) < float(gr.has(4).substring()))
+                        elif op == ">":
+                            testresult = (float(gr.has(2).substring()) > float(gr.has(4).substring()))
+                        else:
+                            raise Exception(op)
+
                     self.stack += [("if",testresult)]
                     skip = True
                 elif args[0] == "then":
@@ -578,7 +602,7 @@ class shell:
                 cat(s, self.eval(c))
             return s #"".join(s)
         elif gr.is_("raw_word"):
-            return [gr.substring()]
+            return [unesc(gr.substring())]
         elif gr.is_("math"):
             ms = gr.substring()
             ms = ms[3:-2]
@@ -715,6 +739,9 @@ def test(cmd):
     assert e == s.error, f"<{e}> != <{s.error}>"
 
 test("if [ 1 = 0 ]; then echo true; else echo false; fi")
+test("if [ 1 \\> 0 ]; then echo true; else echo false; fi")
+test("if [ 1 \\< 0 ]; then echo true; else echo false; fi")
+test("if [ 1 != 0 ]; then echo true; else echo false; fi")
 test("echo {a,b{c,d}}{e,f}")
 s.run_text('if [ a = b ]; then echo $HOME; fi;')
 s.run_text('''
