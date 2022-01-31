@@ -1,4 +1,8 @@
 #!/usr/bin/env python3 
+# Purpose of Piebash
+# (1) Security for Science Gateways
+# (2) Supercharge Jupyter: Allow in-process calling of bash from Python, save ENVIRON variables, etc.
+# (3) Call python functions from bash or bash functions from python
 from Piraha import parse_peg_src, Matcher, Group
 from subprocess import Popen, PIPE, STDOUT
 import os
@@ -490,7 +494,9 @@ class shell:
         self.stdout = stdout
         self.stderr = stderr
         self.lines = []
+        self.cmds = []
         self.stack = []
+        self.for_loops = []
         self.funcs = {}
         self.output = ""
         self.error = ""
@@ -508,6 +514,7 @@ class shell:
             result = []
             ending = ""
             for c in gr.children:
+                self.cmds += [c]
                 if ending == "&&" and self.vars["?"] != "0":
                     continue
                 elif ending == "||" and self.vars["?"] == "0":
@@ -545,6 +552,8 @@ class shell:
                     #here(args,k.dump())
 
             if len(args)>0:
+                if args[0] == "for":
+                    self.for_loops += [(len(cmd),args,[0])]
 
                 if args[0] == "then":
                     args = args[1:]
@@ -779,6 +788,7 @@ def test(cmd):
     assert o == s.output
     assert e == s.error, f"<{e}> != <{s.error}>"
 
+#test("for a in 1 2 3; do echo $a; done")
 test("if [ 1 = 0 ]; then echo true; else echo false; fi")
 test("if [ 0 = 0 ]; then echo true; else if [ 1 = 0 ]; then echo false; fi; fi")
 test("if [ 0 = 1 ]; then echo true; else if [ 1 = 0 ]; then echo false; fi; fi")
@@ -788,12 +798,12 @@ test("if [ 1 \\< 0 ]; then echo true; else echo false; fi")
 test("if [ 1 != 0 ]; then echo true; else echo false; fi")
 test("echo {a,b{c,d}}{e,f}")
 s.run_text('if [ a = b ]; then echo $HOME; fi;')
-s.run_text('''
-for x in 1 2 3
-do
-  echo $x
-done
-'''.strip()+"\n")
+#s.run_text('''
+#for x in 1 2 3
+#do
+#  echo $x
+#done
+#'''.strip()+"\n")
 test('echo ${b-date}')
 test('echo aaa ${b:-date}')
 test('echo aaa ${b:-$(date +%m-%d-%Y)"y"$q}')
@@ -805,6 +815,7 @@ test('''echo hello 2>&1''')
 
 s.run_text('echo "hello ')
 s.run_text('world"')
+print("GOT WORLD")
 s.run_text('echo hello \\\n')
 s.run_text('world-$(date)')
 s.run_text('echo "Date $(date) $((22+10*2))"')
