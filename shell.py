@@ -124,6 +124,16 @@ whole_cmd=( {func}|{cmd})* $
 """
 pp,_ = parse_peg_src(grammar)
 
+class For:
+    def __init__(self,variable,values):
+        self.variable = variable
+        self.values = values
+        self.index = 0
+        self.docmd = -1
+        self.donecmd = -1
+    def __repr__(self):
+        return f"For({self.variable},{self.values},{self.docmd},{self.donecmd})"
+
 class WordIter:
     def __init__(self, a):
         self.a = a
@@ -501,20 +511,24 @@ class shell:
         self.output = ""
         self.error = ""
 
-    def eval(self, gr):
-        r = self.eval_(gr)
+    def eval(self, gr, index=-1):
+        r = self.eval_(gr,index)
         if r is None:
             r = []
         assert type(r) in [list, str], gr.dump()+" "+repr(type(r))+" r="+repr(r)
         return r
 
-    def eval_(self, gr):
+    def eval_(self, gr, index=-1):
+        if index == -1:
+            index = len(self.cmds)
+            self.cmds += [gr]
+        assert index >= 0 and index < len(self.cmds), f"index={index}/{len(self.cmds)}"
+        assert gr == self.cmds[index]
         if gr.is_("whole_cmd"):
             #here("wc:",gr.dump())
             result = []
             ending = ""
             for c in gr.children:
-                self.cmds += [c]
                 if ending == "&&" and self.vars["?"] != "0":
                     continue
                 elif ending == "||" and self.vars["?"] == "0":
@@ -552,8 +566,33 @@ class shell:
                     #here(args,k.dump())
 
             if len(args)>0:
+                here("cmd:",args)
                 if args[0] == "for":
-                    self.for_loops += [(len(cmd),args,[0])]
+                    f = For(args[1],args[3:])
+                    self.for_loops += [f]
+                    if f.index < len(f.values):
+                        self.vars[f.variable] = f.values[f.index]
+                    here(self.for_loops)
+                    return
+
+                elif args[0] == "do":
+                    f = self.for_loops[-1]
+                    if f.docmd == -1:
+                        f.docmd = index
+                    args = args[1:]
+
+                elif args[0] == "done":
+                    f = self.for_loops[-1]
+                    assert f.docmd != -1
+                    f.donecmd = index
+                    if len(f.values) > 1:
+                        for ii in range(1,len(f.values)):
+                            f.index = ii
+                            self.vars[f.variable] = f.values[f.index]
+                            for cmdnum in range(f.docmd,f.donecmd):
+                                self.eval(self.cmds[cmdnum], cmdnum)
+                    self.for_loops = self.for_loops[:-1]
+                    return
 
                 if args[0] == "then":
                     args = args[1:]
@@ -601,6 +640,10 @@ class shell:
                     self.stack = self.stack[:-1]
             if len(self.stack) > 0:
                 skip = not self.stack[-1][1]
+            if len(self.for_loops)>0:
+                f = self.for_loops[-1]
+                if f.index >= len(f.values):
+                    skip = True
             if skip:
                 return []
             if len(args)==0:
@@ -609,7 +652,7 @@ class shell:
                 for c in self.funcs[args[0]]:
                     self.eval(c)
                 return []
-            elif args[0] not in ["if","then","else","fi","for","do","done"]:
+            elif args[0] not in ["if","then","else","fi","for","done"]:
                 #if args[0] == "if":
                 #    self.stack += [("if",line)]
                 sout = self.stdout
@@ -777,18 +820,28 @@ class shell:
 s = shell()
 
 def test(cmd):
-    print(colored("TEST","blue"))
-    s.stdout = PIPE
-    s.output = ""
-    s.run_text(cmd)
-    p = Popen(["bash","-c",cmd],universal_newlines=True,stdout=PIPE,stderr=PIPE)
-    o, e = p.communicate()
-    print("   bash: (",colored(re.sub(r'\n',r'\\n',o),"green"),")",sep='')
-    print("piebash: (",colored(re.sub(r'\n',r'\\n',s.output),"magenta"),")",sep='')
-    assert o == s.output
-    assert e == s.error, f"<{e}> != <{s.error}>"
+    varsave = {}
+    for k in s.vars:
+        varsave[k] = s.vars[k]
+    try:
+        print(colored("TEST","blue"))
+        s.stdout = PIPE
+        s.output = ""
+        s.run_text(cmd)
+        p = Popen(["bash","-c",cmd],universal_newlines=True,stdout=PIPE,stderr=PIPE)
+        o, e = p.communicate()
+        print("   bash: (",colored(re.sub(r'\n',r'\\n',o),"green"),")",sep='')
+        print("piebash: (",colored(re.sub(r'\n',r'\\n',s.output),"magenta"),")",sep='')
+        assert o == s.output
+        assert e == s.error, f"<{e}> != <{s.error}>"
+    finally:
+        s.vars = {}
+        for k in varsave:
+            s.vars[k] = varsave[k]
 
-#test("for a in 1 2 3; do echo $a; done")
+test("echo hi; for a in 1 2 3; do echo $a; done")
+test("echo hi; for a in 1 2 3; do echo x; for b in 4 5 6; do echo $a$b; done; done")
+test("if [ 1 = 0 ]; then echo a; echo b; echo c; else echo d; echo e; echo f; fi")
 test("if [ 1 = 0 ]; then echo true; else echo false; fi")
 test("if [ 0 = 0 ]; then echo true; else if [ 1 = 0 ]; then echo false; fi; fi")
 test("if [ 0 = 1 ]; then echo true; else if [ 1 = 0 ]; then echo false; fi; fi")

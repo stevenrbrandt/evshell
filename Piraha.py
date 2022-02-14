@@ -473,6 +473,9 @@ class Group:
     def eval(self):
         return True
 
+    def __repr__(self):
+        return self.dump()
+
     def group(self,n,nm=None):
       if n < 0:
         n += self.groupCount()
