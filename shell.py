@@ -560,13 +560,14 @@ class shell:
                     if f.docmd == -1:
                         f.docmd = index
                     args = args[1:]
+                    if len(args) == 0:
+                        return
 
-                if args[0] == "for":
+                if 0 < len(args) and args[0] == "for":
                     f = For(args[1],args[3:])
                     self.for_loops += [f]
                     if f.index < len(f.values):
                         self.vars[f.variable] = f.values[f.index]
-                    here(self.for_loops)
                     return
 
                 elif args[0] == "done":
