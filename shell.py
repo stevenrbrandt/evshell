@@ -566,7 +566,12 @@ class shell:
                     #here(args,k.dump())
 
             if len(args)>0:
-                here("cmd:",args)
+                if args[0] == "do":
+                    f = self.for_loops[-1]
+                    if f.docmd == -1:
+                        f.docmd = index
+                    args = args[1:]
+
                 if args[0] == "for":
                     f = For(args[1],args[3:])
                     self.for_loops += [f]
@@ -574,12 +579,6 @@ class shell:
                         self.vars[f.variable] = f.values[f.index]
                     here(self.for_loops)
                     return
-
-                elif args[0] == "do":
-                    f = self.for_loops[-1]
-                    if f.docmd == -1:
-                        f.docmd = index
-                    args = args[1:]
 
                 elif args[0] == "done":
                     f = self.for_loops[-1]
@@ -840,7 +839,7 @@ def test(cmd):
             s.vars[k] = varsave[k]
 
 test("echo hi; for a in 1 2 3; do echo $a; done")
-test("echo hi; for a in 1 2 3; do echo x; for b in 4 5 6; do echo $a$b; done; done")
+test("echo hi; for a in 1 2 3; do for b in 4 5 6; do echo $a$b; done; done")
 test("if [ 1 = 0 ]; then echo a; echo b; echo c; else echo d; echo e; echo f; fi")
 test("if [ 1 = 0 ]; then echo true; else echo false; fi")
 test("if [ 0 = 0 ]; then echo true; else if [ 1 = 0 ]; then echo false; fi; fi")
