@@ -769,13 +769,13 @@ class shell:
             return [gr.substring()]
 
     def run_text(self,txt):
-        print(colored("="*50,"yellow"))
+        #print(colored("="*50,"yellow"))
         txt = self.txt + txt
         if txt.endswith("\\\n"):
             self.txt = txt
             return "CONTNUE"
 
-        print(colored(txt,"cyan"))
+        #print(colored(txt,"cyan"))
         m = Matcher(pp, "whole_cmd", txt)
         if m.matches():
             # here(m.gr.dump())
@@ -804,3 +804,15 @@ class shell:
             here("done")
             exit(0)
             return "SYNTAX"
+
+if __name__ == "__main__":
+    s = shell()
+    if len(sys.argv) == 1:
+        while True:
+            print(colored('shell> ','green'),end='')
+            sys.stdout.flush()
+            s.run_text(input())
+    else:
+        for f in sys.argv[1:]:
+            with open(f,"r") as fd:
+                s.run_text(fd.read())
