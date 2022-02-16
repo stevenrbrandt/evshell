@@ -575,6 +575,7 @@ class shell:
 
                 if args[0] == "for":
                     f = For(args[1],args[3:])
+                    assert args[2] == "in", "Syntax: for var in ..."
                     self.for_loops += [f]
                     if f.index < len(f.values):
                         self.vars[f.variable] = f.values[f.index]
