@@ -508,11 +508,9 @@ class shell:
         return r
 
     def eval_(self, gr, index=-1):
-        if index == -1:
+        if index == -1 and not gr.is_("whole_cmd"):
             index = len(self.cmds)
             self.cmds += [gr]
-        assert index >= 0 and index < len(self.cmds), f"index={index}/{len(self.cmds)}"
-        assert gr == self.cmds[index]
         if gr.is_("whole_cmd"):
             #here("wc:",gr.dump())
             result = []
@@ -563,14 +561,26 @@ class shell:
                     if len(args) == 0:
                         return
 
-                if 0 < len(args) and args[0] == "for":
+                if args[0] == 'export':
+                    for a in args[1:]:
+                        g = re.match(r'^(\w+)=(.*)',a)
+                        if g:
+                            varname = g.group(1)
+                            value = g.group(2)
+                            self.vars[varname] = value
+                            os.environ[varname] = value
+                        elif a in self.vars:
+                            os.environ[a] = self.vars[a]
+                    return
+
+                if args[0] == "for":
                     f = For(args[1],args[3:])
                     self.for_loops += [f]
                     if f.index < len(f.values):
                         self.vars[f.variable] = f.values[f.index]
                     return
 
-                elif args[0] == "done":
+                if args[0] == "done":
                     f = self.for_loops[-1]
                     assert f.docmd != -1
                     f.donecmd = index
@@ -627,6 +637,14 @@ class shell:
                         self.stack += [("if",TFN(testresult))]
                 elif args[0] == "fi":
                     self.stack = self.stack[:-1]
+                
+                g = re.match(r'(\w+)=(.*)', args[0])
+                if g:
+                    varname = g.group(1)
+                    value = g.group(2)
+                    self.vars[varname] = value
+                    return
+
             if len(self.stack) > 0:
                 skip = not self.stack[-1][1]
             if len(self.for_loops)>0:
@@ -812,7 +830,13 @@ if __name__ == "__main__":
         while True:
             print(colored('shell> ','green'),end='')
             sys.stdout.flush()
-            s.run_text(input())
+            try:
+                inp = input()
+                s.run_text(inp)
+            except KeyboardInterrupt as ke:
+                print(colored("Interrupt","red"))
+            except EOFError as ee:
+                exit(s.vars["?"])
     else:
         for f in sys.argv[1:]:
             with open(f,"r") as fd:

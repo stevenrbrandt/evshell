@@ -26,6 +26,11 @@ def test(cmd):
         for k in varsave:
             s.vars[k] = varsave[k]
 
+test("for i in $(seq 1 10); do echo $i; done")
+test("""for i in $(seq 1 10)
+do echo $i
+done
+""")
 test("echo hi; for a in 1 2 3; do echo $a; done")
 test("echo hi; for a in 1 2 3; do for b in 4 5 6; do echo $a$b; done; done")
 test("if [ 1 = 0 ]; then echo a; echo b; echo c; else echo d; echo e; echo f; fi")
