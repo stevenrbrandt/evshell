@@ -596,12 +596,15 @@ class shell:
 
                 if args[0] == "then":
                     args = args[1:]
+                    if len(args) == 0:
+                        return
 
                 elif args[0] == "else":
                     args = args[1:]
                     self.stack[-1][1].toggle()
 
                 if args[0] == "if":
+                    testresult = None
                     if len(self.stack) > 0 and not self.stack[-1][1]:
                         self.stack += [("if",TFN(Never))]
                     else:
@@ -618,6 +621,22 @@ class shell:
                             endmark = -2
                         elif gr.StrEq(-6,"if").StrEq(-5,"[[").StrEq(-1,"]]").eval():
                             endmark = -1
+                        elif gr.StrEq(-4,"-e"):
+                            fname = gr.group(-3).substring()
+                            fname = re.sub(r'^~(?=/)',os.environ["HOME"],fname)
+                            testresult = os.path.exists(fname)
+                        elif gr.StrEq(-4,"-r"):
+                            fname = gr.group(-3).substring()
+                            fname = re.sub(r'^~(?=/)',os.environ["HOME"],fname)
+                            testresult = os.path.exists(fname) and os.access(fname, os.R_OK)
+                        elif gr.StrEq(-4,"-w"):
+                            fname = gr.group(-3).substring()
+                            fname = re.sub(r'^~(?=/)',os.environ["HOME"],fname)
+                            testresult = os.path.exists(fname) and os.access(fname, os.W_OK)
+                        elif gr.StrEq(-4,"-x"):
+                            fname = gr.group(-3).substring()
+                            fname = re.sub(r'^~(?=/)',os.environ["HOME"],fname)
+                            testresult = os.path.exists(fname) and os.access(fname, os.X_OK)
             
                         if endmark is not None:
                             testresult = 0
@@ -635,6 +654,8 @@ class shell:
                             else:
                                 raise Exception(op)
 
+                        if testresult is None:
+                            print(gr.dump())
                         self.stack += [("if",TFN(testresult))]
                 elif args[0] == "fi":
                     self.stack = self.stack[:-1]
