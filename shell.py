@@ -499,6 +499,28 @@ class shell:
         self.funcs = {}
         self.output = ""
         self.error = ""
+    
+    def lookup_var(self,gr):
+        varname = gr.has(0,"w").substring()
+        if varname in os.environ:
+            v = spaceout(re.split(r'\s+', os.environ[varname]))
+        elif varname in self.vars:
+            v = spaceout(re.split(r'\s+', self.vars[varname]))
+        else:
+            v = None
+        if v is None and gr.has(1,"unset"):
+            v = self.eval(gr.children[2])
+        elif v is None and gr.has(1,"unset_raw"):
+            v = self.eval(gr.children[2])
+        rmb = gr.has(1,"rm_back")
+        if rmb:
+            back = gr.children[2].substring()
+            if len(v) > 0 and v[0].endswith(back):
+                v[0] = v[0][:-len(back)]
+        if v is None:
+            return ""
+        else:
+            return v
 
     def eval(self, gr, index=-1):
         r = self.eval_(gr,index)
@@ -643,14 +665,25 @@ class shell:
                             op = unesc(gr.has(endmark-2).substring())
                             arg1 = gr.has(endmark-3)
                             arg2 = gr.has(endmark-1)
+
+                            if arg1.has(0,"var"):
+                                arg1 = self.lookup_var(arg1.group(0))[0]
+                            else:
+                                arg1 = arg1.substring()
+
+                            if arg2.has(0,"var"):
+                                arg2 = self.lookup_var(arg2.group(0))[0]
+                            else:
+                                arg2 = arg2.substring()
+
                             if op == "=":
-                                testresult = (arg1.substring() == arg2.substring())
+                                testresult = (arg1 == arg2)
                             elif op == "!=":
-                                testresult = (arg1.substring() != arg2.substring())
+                                testresult = (arg1 != arg2)
                             elif op == "<":
-                                testresult = (float(arg1.substring()) < float(arg2.substring()))
+                                testresult = (float(arg1) < float(arg2))
                             elif op == ">":
-                                testresult = (float(arg1.substring()) > float(arg2.substring()))
+                                testresult = (float(arg1) > float(arg2))
                             else:
                                 raise Exception(op)
 
@@ -771,28 +804,7 @@ class shell:
             else:
                 return s[1]
         elif gr.is_("var"):
-            varname = gr.has(0,"w").substring()
-            if varname in os.environ:
-                v = spaceout(re.split(r'\s+', os.environ[varname]))
-            elif varname in self.vars:
-                v = spaceout(re.split(r'\s+', self.vars[varname]))
-            else:
-                v = None
-
-            if v is None and gr.has(1,"unset"):
-                v = self.eval(gr.children[2])
-            elif v is None and gr.has(1,"unset_raw"):
-                v = self.eval(gr.children[2])
-            rmb = gr.has(1,"rm_back")
-            if rmb:
-                back = gr.children[2].substring()
-                if len(v) > 0 and v[0].endswith(back):
-                    v[0] = v[0][:-len(back)]
-
-            if v is None:
-                return ""
-            else:
-                return v
+            return self.lookup_var(gr)
         elif gr.has(0,"fd_from") and gr.has(1,"fd_to"):
             fd_from = gr.children[0].substring()
             fd_to = gr.children[1].substring()
@@ -830,7 +842,10 @@ class shell:
             self.txt = ''
             self.lines += [m.gr]
             self.eval(m.gr)
-            return "EVAL"
+            if len(self.stack) > 0 or len(self.for_loops) > 0:
+                return "EVALCONTINUE"
+            else:
+                return "EVAL"
         elif m.maxTextPos == len(txt):
             self.txt = txt
             print()

@@ -93,4 +93,9 @@ test("./a.sh && ./b.sh")
 test("./a.sh || ./b.sh")
 test("./b.sh && ./a.sh")
 test("./b.sh || ./a.sh")
+for f in os.listdir("tests"):
+    ft = os.path.join("tests", f)
+    print("Running test file:", ft)
+    with open(ft, "r") as fd:
+        test(fd.read())
 here("All tests passed")
