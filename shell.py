@@ -503,8 +503,7 @@ def expandtilde(s):
     elif type(s) == list:
         return [expandtilde(s[0])] + s[1:]
     else:
-        here(type(s))
-        raise Exception()
+        return s
 
 class shell:
     
