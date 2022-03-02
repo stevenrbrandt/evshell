@@ -28,6 +28,16 @@ def test(cmd):
         for k in varsave:
             s.vars[k] = varsave[k]
 
+
+skip = False
+for f in sys.argv[1:]:
+    print("Running test file:", f)
+    with open(f, "r") as fd:
+        test(fd.read())
+    skip = True
+if skip:
+    here("Done")
+    exit(0)
 test("for i in $(seq 1 10); do echo $i; done")
 test("""for i in $(seq 1 10)
 do echo $i

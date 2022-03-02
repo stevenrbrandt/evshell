@@ -3,6 +3,7 @@
 # (1) Security for Science Gateways
 # (2) Supercharge Jupyter: Allow in-process calling of bash from Python, save ENVIRON variables, etc.
 # (3) Call python functions from bash or bash functions from python
+from pwd import getpwnam
 from Piraha import parse_peg_src, Matcher, Group
 from subprocess import Popen, PIPE, STDOUT
 import os
@@ -485,6 +486,26 @@ def cat(a, b):
     else:
         assert False
 
+def expandtilde(s):
+    if type(s) == str:
+        if s.startswith("~/"):
+            return home + s[1:]
+        if len(s)>0 and s[0] == '~':
+            g = re.match(r'^~(\w+)/(.*)', s)
+            if g:
+                try:
+                    pw = getpwnam(g.group(1))
+                    if pw is not None:
+                        return pw.pw_dir+"/"+g.group(2)
+                except:
+                    pass
+        return s
+    elif type(s) == list:
+        return [expandtilde(s[0])] + s[1:]
+    else:
+        here(type(s))
+        raise Exception()
+
 class shell:
     
     def __init__(self,stdout = sys.stdout, stderr = sys.stderr):
@@ -605,6 +626,10 @@ class shell:
             for k in gr.children:
                 if not k.is_("ending") and not k.has(0,"redir"):
                     ek = self.eval(k)
+                    if k.has(0,"dquote") or k.has(0,"squote"):
+                        pass
+                    else:
+                        ek = expandtilde(ek)
                     #here(ek,k.dump())
                     exk = expand1(ek).build_strs()
                     #here("ex=>",str(ex1))
