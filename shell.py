@@ -489,7 +489,7 @@ class shell:
     
     def __init__(self,stdout = sys.stdout, stderr = sys.stderr):
         self.txt = ""
-        self.vars = {"?":"0", "*":" ".join(sys.argv[2:])}
+        self.vars = {"?":"0", "PWD":os.path.realpath(os.getcwd()),"*":" ".join(sys.argv[2:])}
         self.stdout = stdout
         self.stderr = stderr
         self.lines = []
@@ -521,6 +521,58 @@ class shell:
             return ""
         else:
             return v
+
+    def evaltest(self, args, index=0):
+        evalresult = False
+        if args[index] == "if":
+            index += 1
+        if args[index] in ["[[","["]:
+            start = args[index]
+            index += 1
+        else:
+            start = None
+        if index < len(args) and args[index] in ["-e","-w","r","-x","-f","-d"]:
+            op = args[index]
+            assert index+1 < len(args), f"No file following opertor '{op}'"
+            fname = args[index+1]
+            if op == "-x":
+                evalresult = os.path.exists(fname) and os.access(fname, os.X_OK)
+            elif op == "-r":
+                evalresult = os.path.exists(fname) and os.access(fname, os.R_OK)
+            elif op == "-w":
+                evalresult = os.path.exists(fname) and os.access(fname, os.W_OK)
+            elif op == "-e":
+                evalresult = os.path.exists(fname)
+            elif op == "-d":
+                evalresult = os.path.isdir(fname)
+            elif op == "-f":
+                evalresult = os.path.isfile(fname)
+            else:
+                assert False
+            index += 2
+        if index+1 < len(args) and args[index+1] in ["=","!=","\\<","<",">","\\>"]:
+            op = args[index+1]
+            arg1 = args[index]
+            arg2 = args[index+2]
+            index += 3
+            if op == "=":
+                evalresult = arg1 == arg2
+            elif op == "!=":
+                evalresult = arg1 != arg2
+            elif op in ["<","\\<"]:
+                evalresult = int(arg1) < int(arg2)
+            elif op in [">","\\>"]:
+                evalresult = int(arg1) > int(arg2)
+            else:
+                assert False
+        if index < len(args) and args[index] == "]":
+            index += 1
+            assert start == "[", f"Mismatched braces: '{start}' and '{args[index]}'"
+        if index < len(args) and args[index] == "]]":
+            index += 1
+            assert start == "[[", f"Mismatched braces: '{start}' and '{args[index]}'"
+        assert index == len(args), f"index: {index}, args={args}"
+        return evalresult
 
     def eval(self, gr, index=-1):
         r = self.eval_(gr,index)
@@ -572,7 +624,6 @@ class shell:
                                     args[-1] += kk
                         else:
                             assert False
-                    #here(args,k.dump())
 
             if len(args)>0:
                 if args[0] == "do":
@@ -630,63 +681,11 @@ class shell:
                     if len(self.stack) > 0 and not self.stack[-1][1]:
                         self.stack += [("if",TFN(Never))]
                     else:
-                        endmark = None
                         # if [ a = b ] ;
                         #  7 6 5 4 3 2 1
                         # if [ a = b ] 
                         #  6 5 4 3 2 1 
-                        if gr.Has(-1,"ending").StrEq(-7,"if").StrEq(-6,"[").StrEq(-2,"]").Has(-1,"ending").eval():
-                            endmark = -2
-                        elif gr.StrEq(-6,"if").StrEq(-5,"[").StrEq(-1,"]").eval():
-                            endmark = -1
-                        elif gr.Has(-1,"ending").StrEq(-7,"if").StrEq(-6,"[[").StrEq(-2,"]]").Has(-1,"ending").eval():
-                            endmark = -2
-                        elif gr.StrEq(-6,"if").StrEq(-5,"[[").StrEq(-1,"]]").eval():
-                            endmark = -1
-                        elif gr.StrEq(-4,"-e"):
-                            fname = gr.group(-3).substring()
-                            fname = re.sub(r'^~(?=/)',os.environ["HOME"],fname)
-                            testresult = os.path.exists(fname)
-                        elif gr.StrEq(-4,"-r"):
-                            fname = gr.group(-3).substring()
-                            fname = re.sub(r'^~(?=/)',os.environ["HOME"],fname)
-                            testresult = os.path.exists(fname) and os.access(fname, os.R_OK)
-                        elif gr.StrEq(-4,"-w"):
-                            fname = gr.group(-3).substring()
-                            fname = re.sub(r'^~(?=/)',os.environ["HOME"],fname)
-                            testresult = os.path.exists(fname) and os.access(fname, os.W_OK)
-                        elif gr.StrEq(-4,"-x"):
-                            fname = gr.group(-3).substring()
-                            fname = re.sub(r'^~(?=/)',os.environ["HOME"],fname)
-                            testresult = os.path.exists(fname) and os.access(fname, os.X_OK)
-            
-                        if endmark is not None:
-                            testresult = 0
-                            op = unesc(gr.has(endmark-2).substring())
-                            arg1 = gr.has(endmark-3)
-                            arg2 = gr.has(endmark-1)
-
-                            if arg1.has(0,"var"):
-                                arg1 = self.lookup_var(arg1.group(0))[0]
-                            else:
-                                arg1 = arg1.substring()
-
-                            if arg2.has(0,"var"):
-                                arg2 = self.lookup_var(arg2.group(0))[0]
-                            else:
-                                arg2 = arg2.substring()
-
-                            if op == "=":
-                                testresult = (arg1 == arg2)
-                            elif op == "!=":
-                                testresult = (arg1 != arg2)
-                            elif op == "<":
-                                testresult = (float(arg1) < float(arg2))
-                            elif op == ">":
-                                testresult = (float(arg1) > float(arg2))
-                            else:
-                                raise Exception(op)
-
+                        testresult = self.evaltest(args)
                         if testresult is None:
                             print(gr.dump())
                         self.stack += [("if",TFN(testresult))]

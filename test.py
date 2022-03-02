@@ -11,9 +11,11 @@ def test(cmd):
     for k in s.vars:
         varsave[k] = s.vars[k]
     try:
-        print(colored("TEST","blue"))
+        print(colored("TEST","blue"),cmd)
         s.stdout = PIPE
+        s.stderr = PIPE
         s.output = ""
+        s.error = ""
         s.run_text(cmd)
         p = Popen(["bash","-c",cmd],universal_newlines=True,stdout=PIPE,stderr=PIPE)
         o, e = p.communicate()
