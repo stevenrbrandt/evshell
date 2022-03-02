@@ -733,6 +733,15 @@ class shell:
                 return []
             if len(args)==0:
                 return []
+
+            if args[0] == "cd":
+                if len(args) == 1:
+                    os.chdir(home)
+                else:
+                    os.chdir(args[1])
+                os.environ["PWD"] = os.getcwd()
+                return
+
             if args[0] in self.funcs:
                 for c in self.funcs[args[0]]:
                     self.eval(c)
@@ -887,6 +896,10 @@ class shell:
 if __name__ == "__main__":
     s = shell()
     if len(sys.argv) == 1:
+        try:
+            import readline
+        except:
+            print(colored("Import of readline failed","red"))
         while True:
             print(colored('shell> ','green'),end='')
             sys.stdout.flush()
