@@ -6,6 +6,7 @@
 from pwd import getpwnam
 from Piraha import parse_peg_src, Matcher, Group
 from subprocess import Popen, PIPE, STDOUT
+from pipe_threads import PipeThread
 import os
 import sys
 import re
@@ -507,9 +508,10 @@ def expandtilde(s):
 
 class shell:
     
-    def __init__(self,stdout = sys.stdout, stderr = sys.stderr):
+    def __init__(self,stdout = sys.stdout, stderr = sys.stderr, stdin = sys.stdin):
         self.txt = ""
         self.vars = {"?":"0", "PWD":os.path.realpath(os.getcwd()),"*":" ".join(sys.argv[2:])}
+        self.stdin = stdin
         self.stdout = stdout
         self.stderr = stderr
         self.lines = []
@@ -594,29 +596,53 @@ class shell:
         assert index == len(args), f"index: {index}, args={args}"
         return evalresult
 
-    def eval(self, gr, index=-1):
-        r = self.eval_(gr,index)
+    def eval(self, gr, index=-1,xending=None):
+        r = self.eval_(gr,index,xending)
         if r is None:
             r = []
         assert type(r) in [list, str], gr.dump()+" "+repr(type(r))+" r="+repr(r)
         return r
 
-    def eval_(self, gr, index=-1):
+    def eval_(self, gr, index=-1, xending=None):
         if index == -1 and not gr.is_("whole_cmd"):
             index = len(self.cmds)
             self.cmds += [gr]
         if gr.is_("whole_cmd"):
             #here("wc:",gr.dump())
+            pipes = None
             result = []
-            ending = ""
+            ending = None
+            my_ending = None
+            iter = 0
             for c in gr.children:
-                if ending == "&&" and self.vars["?"] != "0":
-                    continue
+                iter += 1
+                skip = False
+                if my_ending == "&&" and self.vars["?"] != "0":
+                    skip = True
                 elif ending == "||" and self.vars["?"] == "0":
-                    continue
-                result = self.eval(c)
+                    skip = True
                 if c.has(-1,"ending"):
-                    ending = c.has(-1).substring()
+                    my_ending = c.has(-1).substring()
+                if my_ending == "|":
+                    new_pipes = os.pipe()
+                else:
+                    new_pipes = None
+
+                if new_pipes is not None:
+                    save_out = self.stdout
+                    self.stdout = new_pipes[1]
+                if pipes is not None:
+                    save_in = self.stdin
+                    self.stdin = pipes[0]
+                if not skip:
+                    result = self.eval(c,xending=my_ending)
+                if new_pipes is not None:
+                    self.stdout = save_out
+                if pipes is not None:
+                    self.stdin = save_in
+
+                ending = my_ending
+                pipes = new_pipes
             return result
         elif gr.is_("cmd"):
             args = []
@@ -766,17 +792,23 @@ class shell:
                     except:
                         pass
                 try:
-                    p = Popen(args, stdout=sout, stderr=serr, universal_newlines=True)
+                    p = PipeThread(args, stdin=self.stdin, stdout=sout, stderr=serr, universal_newlines=True)
                 except OSError as e:
                     args = ["/bin/sh"]+args
-                    p = Popen(args, stdout=sout, stderr=serr, universal_newlines=True)
-                o, e = p.communicate("")
-                if type(o) == str:
-                    self.output += o
-                if type(e) == str:
-                    self.error += e
-                self.vars["?"] = str(p.returncode)
-                return o
+                    p = PipeThread(args, stdin=self.stdin, stdout=sout, stderr=serr, universal_newlines=True)
+                if xending == "|":
+                    p.setDaemon(True)
+                    p.start()
+                    return []
+                else:
+                    p.start()
+                    o, e = p.communicate()
+                    if type(o) == str:
+                        self.output += o
+                    if type(e) == str:
+                        self.error += e
+                    self.vars["?"] = str(p.returncode)
+                    return o
             return []
         elif gr.is_("glob"):
             return [gr]
@@ -827,6 +859,8 @@ class shell:
             return s
         elif gr.is_("dchar"):
             return gr.substring()
+        elif gr.is_("squote"):
+            return gr.substring()[1:-1]
         elif gr.is_("dlit"):
             s = gr.substring()
             if s == "\\n":
