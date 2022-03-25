@@ -521,6 +521,10 @@ class shell:
         self.funcs = {}
         self.output = ""
         self.error = ""
+        self.save_in = []
+        self.save_out = []
+        self.last_ending = None
+        self.last_pipe = None
     
     def lookup_var(self,gr):
         varname = gr.has(0,"w").substring()
@@ -613,203 +617,238 @@ class shell:
             result = []
             ending = None
             my_ending = None
-            iter = 0
             for c in gr.children:
-                iter += 1
-                skip = False
-                if my_ending == "&&" and self.vars["?"] != "0":
-                    skip = True
-                elif ending == "||" and self.vars["?"] == "0":
-                    skip = True
-                if c.has(-1,"ending"):
-                    my_ending = c.has(-1).substring()
-                if my_ending == "|":
-                    new_pipes = os.pipe()
-                else:
-                    new_pipes = None
+#                skip = False
+#                if ending == "&&" and self.vars["?"] != "0":
+#                    skip = True
+#                elif ending == "||" and self.vars["?"] == "0":
+#                    skip = True
+#                if c.has(-1,"ending"):
+#                    my_ending = c.has(-1).substring()
+#                if my_ending == "|":
+#                    new_pipes = os.pipe()
+#                else:
+#                    new_pipes = None
 
-                if new_pipes is not None:
-                    save_out = self.stdout
-                    self.stdout = new_pipes[1]
-                if pipes is not None:
-                    save_in = self.stdin
-                    self.stdin = pipes[0]
-                if not skip:
-                    result = self.eval(c,xending=my_ending)
-                if new_pipes is not None:
-                    self.stdout = save_out
-                if pipes is not None:
-                    self.stdin = save_in
+#                if new_pipes is not None:
+#                    save_out = self.stdout
+#                    self.stdout = new_pipes[1]
+#                if pipes is not None:
+#                    save_in = self.stdin
+#                    self.stdin = pipes[0]
+#                if not skip:
+#                    result = self.eval(c,xending=my_ending)
+                result = self.eval(c,xending=my_ending)
+#                if new_pipes is not None:
+#                    self.stdout = save_out
+#                if pipes is not None:
+#                    self.stdin = save_in
 
-                ending = my_ending
-                pipes = new_pipes
+#                ending = my_ending
+#                pipes = new_pipes
             return result
         elif gr.is_("cmd"):
+            #here("cmd:",gr.dump())
             args = []
             skip = False
 
-            for k in gr.children:
-                if not k.is_("ending") and not k.has(0,"redir"):
-                    ek = self.eval(k)
-                    if k.has(0,"dquote") or k.has(0,"squote"):
-                        pass
-                    else:
-                        ek = expandtilde(ek)
-                    #here(ek,k.dump())
-                    exk = expand1(ek).build_strs()
-                    #here("ex=>",str(ex1))
-                    #here("bs=",ex1.build_strs())
-                    #exk = expand(ek)
-                    for nek in exk:
-                        nek = deglob(nek)
-                        if type(nek) == str:
-                            args += [nek]
-                        elif type(nek) == list:
-                            #args += ["".join(nek)]
-                            args += [""]
-                            for kk in nek:
-                                if isinstance(kk,Space):
-                                    args += [""]
-                                else:
-                                    args[-1] += kk
+            if self.last_ending == "&&" and self.vars["?"] == "0":
+                skip = True
+            if self.last_ending == "||" and self.vars["?"] != "0":
+                skip = True
+            if gr.has(-1,"ending"):
+                self.curr_ending = gr.group(-1).substring()
+            if self.curr_ending == "|":
+                self.curr_pipe = os.pipe()
+            else:
+                self.curr_pipe = None
+            if self.curr_pipe is not None:
+                self.save_out += [self.stdout]
+                self.stdout = self.curr_pipe[1]
+            if self.last_pipe is not None:
+                self.save_in += [self.stdin]
+                self.stdin = self.last_pipe[0]
+
+            try:
+                for k in gr.children:
+                    if not k.is_("ending") and not k.has(0,"redir"):
+                        ek = self.eval(k)
+                        if k.has(0,"dquote") or k.has(0,"squote"):
+                            pass
                         else:
-                            assert False
-
-            if len(args)>0:
-                if args[0] == "do":
-                    f = self.for_loops[-1]
-                    if f.docmd == -1:
-                        f.docmd = index
-                    args = args[1:]
-                    if len(args) == 0:
+                            ek = expandtilde(ek)
+                        #here(ek,k.dump())
+                        exk = expand1(ek).build_strs()
+                        #here("ex=>",str(ex1))
+                        #here("bs=",ex1.build_strs())
+                        #exk = expand(ek)
+                        for nek in exk:
+                            nek = deglob(nek)
+                            if type(nek) == str:
+                                args += [nek]
+                            elif type(nek) == list:
+                                #args += ["".join(nek)]
+                                args += [""]
+                                for kk in nek:
+                                    if isinstance(kk,Space):
+                                        args += [""]
+                                    else:
+                                        args[-1] += kk
+                            else:
+                                assert False
+    
+                if len(args)>0:
+                    if args[0] == "do":
+                        f = self.for_loops[-1]
+                        if f.docmd == -1:
+                            f.docmd = index
+                        args = args[1:]
+                        if len(args) == 0:
+                            return
+    
+                    if args[0] == 'export':
+                        for a in args[1:]:
+                            g = re.match(r'^(\w+)=(.*)',a)
+                            if g:
+                                varname = g.group(1)
+                                value = g.group(2)
+                                self.vars[varname] = value
+                                os.environ[varname] = value
+                            elif a in self.vars:
+                                os.environ[a] = self.vars[a]
                         return
-
-                if args[0] == 'export':
-                    for a in args[1:]:
-                        g = re.match(r'^(\w+)=(.*)',a)
-                        if g:
-                            varname = g.group(1)
-                            value = g.group(2)
-                            self.vars[varname] = value
-                            os.environ[varname] = value
-                        elif a in self.vars:
-                            os.environ[a] = self.vars[a]
-                    return
-
-                if args[0] == "for":
-                    f = For(args[1],args[3:])
-                    assert args[2] == "in", "Syntax: for var in ..."
-                    self.for_loops += [f]
-                    if f.index < len(f.values):
-                        self.vars[f.variable] = f.values[f.index]
-                    return
-
-                if args[0] == "done":
-                    f = self.for_loops[-1]
-                    assert f.docmd != -1
-                    f.donecmd = index
-                    if len(f.values) > 1:
-                        for ii in range(1,len(f.values)):
-                            f.index = ii
+    
+                    if args[0] == "for":
+                        f = For(args[1],args[3:])
+                        assert args[2] == "in", "Syntax: for var in ..."
+                        self.for_loops += [f]
+                        if f.index < len(f.values):
                             self.vars[f.variable] = f.values[f.index]
-                            for cmdnum in range(f.docmd,f.donecmd):
-                                self.eval(self.cmds[cmdnum], cmdnum)
-                    self.for_loops = self.for_loops[:-1]
-                    return
-
-                if args[0] == "then":
-                    args = args[1:]
-                    if len(args) == 0:
                         return
-
-                elif args[0] == "else":
-                    args = args[1:]
-                    self.stack[-1][1].toggle()
-
-                if args[0] == "if":
-                    testresult = None
-                    if len(self.stack) > 0 and not self.stack[-1][1]:
-                        self.stack += [("if",TFN(Never))]
-                    else:
-                        # if [ a = b ] ;
-                        #  7 6 5 4 3 2 1
-                        # if [ a = b ] 
-                        #  6 5 4 3 2 1 
-                        testresult = self.evaltest(args)
-                        if testresult is None:
-                            print(gr.dump())
-                        self.stack += [("if",TFN(testresult))]
-                elif args[0] == "fi":
-                    self.stack = self.stack[:-1]
-                
-                g = re.match(r'(\w+)=(.*)', args[0])
-                if g:
-                    varname = g.group(1)
-                    value = g.group(2)
-                    self.vars[varname] = value
-                    return
-
-            if len(self.stack) > 0:
-                skip = not self.stack[-1][1]
-            if len(self.for_loops)>0:
-                f = self.for_loops[-1]
-                if f.index >= len(f.values):
-                    skip = True
-            if skip:
-                return []
-            if len(args)==0:
-                return []
-
-            if args[0] == "cd":
-                if len(args) == 1:
-                    os.chdir(home)
-                else:
-                    os.chdir(args[1])
-                os.environ["PWD"] = os.getcwd()
-                return
-
-            if args[0] in self.funcs:
-                for c in self.funcs[args[0]]:
-                    self.eval(c)
-                return []
-            elif args[0] not in ["if","then","else","fi","for","done"]:
-                #if args[0] == "if":
-                #    self.stack += [("if",line)]
-                sout = self.stdout
-                serr = self.stderr
-                if not os.path.exists(args[0]):
-                    for path in os.environ.get("PATH",".").split(":"):
-                        full_path = os.path.join(path, args[0])
-                        if os.path.exists(full_path):
-                            args[0] = full_path
-                            break
-                if os.path.exists(args[0]):
-                    try:
-                        with open(args[0],"r") as fd:
-                            first_line = fd.readline()
-                            if first_line.startswith("#!"):
-                                args = re.split(r'\s+',first_line[2:].strip()) + args
-                    except:
-                        pass
-                try:
-                    p = PipeThread(args, stdin=self.stdin, stdout=sout, stderr=serr, universal_newlines=True)
-                except OSError as e:
-                    args = ["/bin/sh"]+args
-                    p = PipeThread(args, stdin=self.stdin, stdout=sout, stderr=serr, universal_newlines=True)
-                if xending == "|":
-                    p.setDaemon(True)
-                    p.start()
+    
+                    if args[0] == "done":
+                        f = self.for_loops[-1]
+                        assert f.docmd != -1
+                        f.donecmd = index
+                        if len(f.values) > 1:
+                            for ii in range(1,len(f.values)):
+                                f.index = ii
+                                self.vars[f.variable] = f.values[f.index]
+                                for cmdnum in range(f.docmd,f.donecmd):
+                                    self.eval(self.cmds[cmdnum], cmdnum)
+                        self.for_loops = self.for_loops[:-1]
+                        return
+    
+                    if args[0] == "then":
+                        args = args[1:]
+                        if len(args) == 0:
+                            return
+    
+                    elif args[0] == "else":
+                        args = args[1:]
+                        self.stack[-1][1].toggle()
+    
+                    if args[0] == "if":
+                        testresult = None
+                        if len(self.stack) > 0 and not self.stack[-1][1]:
+                            self.stack += [("if",TFN(Never))]
+                        else:
+                            # if [ a = b ] ;
+                            #  7 6 5 4 3 2 1
+                            # if [ a = b ] 
+                            #  6 5 4 3 2 1 
+                            testresult = self.evaltest(args)
+                            if testresult is None:
+                                print(gr.dump())
+                            self.stack += [("if",TFN(testresult))]
+                    elif args[0] == "fi":
+                        self.stack = self.stack[:-1]
+                    
+                    g = re.match(r'(\w+)=(.*)', args[0])
+                    if g:
+                        varname = g.group(1)
+                        value = g.group(2)
+                        self.vars[varname] = value
+                        return
+    
+                if len(self.stack) > 0:
+                    skip = not self.stack[-1][1]
+                if len(self.for_loops)>0:
+                    f = self.for_loops[-1]
+                    if f.index >= len(f.values):
+                        skip = True
+                if skip:
                     return []
-                else:
-                    p.start()
-                    o, e = p.communicate()
-                    if type(o) == str:
-                        self.output += o
-                    if type(e) == str:
-                        self.error += e
-                    self.vars["?"] = str(p.returncode)
-                    return o
-            return []
+                if len(args)==0:
+                    return []
+    
+                if args[0] == "cd":
+                    if len(args) == 1:
+                        os.chdir(home)
+                    else:
+                        os.chdir(args[1])
+                    os.environ["PWD"] = os.getcwd()
+                    return
+    
+                if args[0] in self.funcs:
+                    for c in self.funcs[args[0]]:
+                        self.eval(c)
+                    return []
+                elif args[0] not in ["if","then","else","fi","for","done"]:
+                    #if args[0] == "if":
+                    #    self.stack += [("if",line)]
+                    sout = self.stdout
+                    serr = self.stderr
+                    if not os.path.exists(args[0]):
+                        for path in os.environ.get("PATH",".").split(":"):
+                            full_path = os.path.join(path, args[0])
+                            if os.path.exists(full_path):
+                                args[0] = full_path
+                                break
+                    if os.path.exists(args[0]):
+                        try:
+                            with open(args[0],"r") as fd:
+                                first_line = fd.readline()
+                                if first_line.startswith("#!"):
+                                    args = re.split(r'\s+',first_line[2:].strip()) + args
+                        except:
+                            pass
+                    try:
+                        p = PipeThread(args, stdin=self.stdin, stdout=sout, stderr=serr, universal_newlines=True)
+                    except OSError as e:
+                        args = ["/bin/sh"]+args
+                        p = PipeThread(args, stdin=self.stdin, stdout=sout, stderr=serr, universal_newlines=True)
+                    if xending == "|":
+                        p.setDaemon(True)
+                        p.start()
+                        return []
+                    else:
+                        p.start()
+                        o, e = p.communicate()
+                        if type(o) == str:
+                            self.output += o
+                        if type(e) == str:
+                            self.error += e
+                        self.vars["?"] = str(p.returncode)
+                        return o
+                return []
+#                if new_pipes is not None:
+#                    self.stdout = save_out
+#                if pipes is not None:
+#                    self.stdin = save_in
+
+#                ending = my_ending
+#                pipes = new_pipes
+            finally:
+                if self.curr_pipe is not None:
+                    self.stdout = self.save_out[-1]
+                    self.save_out = self.save_out[:-1]
+                if self.last_pipe is not None:
+                    self.stdin = self.save_in[-1]
+                    self.save_in = self.save_in[:-1]
+                self.last_ending = self.curr_ending
+                self.last_pipe = self.curr_pipe
+
         elif gr.is_("glob"):
             return [gr]
         elif gr.is_("expand"):
