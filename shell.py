@@ -652,9 +652,9 @@ class shell:
             args = []
             skip = False
 
-            if self.last_ending == "&&" and self.vars["?"] == "0":
+            if self.last_ending == "&&" and self.vars["?"] != "0":
                 skip = True
-            if self.last_ending == "||" and self.vars["?"] != "0":
+            if self.last_ending == "||" and self.vars["?"] == "0":
                 skip = True
             if gr.has(-1,"ending"):
                 self.curr_ending = gr.group(-1).substring()
@@ -953,9 +953,9 @@ class shell:
                 return "EVAL"
         elif m.maxTextPos == len(txt):
             self.txt = txt
-            print()
-            m.showError()
-            print("continue...")
+            #print()
+            #m.showError()
+            #print("continue...")
             return "CONTNUE"
         else:
             self.txt = ''
@@ -973,12 +973,16 @@ if __name__ == "__main__":
             import readline
         except:
             print(colored("Import of readline failed","red"))
+        msg = "EVAL"
         while True:
-            print(colored('shell> ','green'),end='')
+            if msg == "EVAL":
+                print(colored('shell> ','green'),end='')
+            else:
+                print(colored('>> ','green'),end='')
             sys.stdout.flush()
             try:
                 inp = input()
-                s.run_text(inp)
+                msg = s.run_text(inp)
             except KeyboardInterrupt as ke:
                 print(colored("Interrupt","red"))
             except EOFError as ee:
