@@ -1,5 +1,6 @@
 import re
 import sys
+from colored import colored
 
 indent = 0
 max_int = 2147483647
@@ -215,8 +216,6 @@ class Lookup:
       if cap:
         m.gr = Group(pname,chSave.text,start,-1)
       m.stack += [pname]
-      if len(m.stack) > len(m.max_stack):
-        m.max_stack = [p for p in m.stack]
       try:
         b = pat.match(m)
       finally:
@@ -278,10 +277,10 @@ class NegLookAhead:
     def match(self,m):
       p  = m.textPos
       h  = m.hash
-      mx = m.maxTextPos
+      mx,ms = m.maxTextPos,m.max_stack
       b = self.pat.match(m)
       m.textPos=p
-      m.maxTextPos=mx
+      m.maxTextPos,m.max_stack=mx,ms
       m.hash = h
       return not b
 
@@ -304,10 +303,10 @@ class LookAhead:
     def match(self,m):
       p  = m.textPos
       h  = m.hash
-      mx = m.maxTextPos
+      mx,ms = m.maxTextPos,m.max_stack
       b = self.pat.match(m)
       m.textPos=p
-      m.maxTextPos=mx
+      m.maxTextPos,m.max_stack=mx,ms
       m.hash = h
       return b
 
@@ -629,7 +628,7 @@ class Matcher:
       for c in pre:
         if c == '\n':
             line += 1
-      print("ERROR ON LINE ",line,":",sep='',file=fd)
+      print(colored("ERROR ON LINE ","red"),line,":",sep='',file=fd)
       g = re.match(r'.*\n.*\n.*\n*$',pre)
       if g:
         pre = g.group(0)+'$'
@@ -653,7 +652,7 @@ class Matcher:
         c = txt[pos]
       if c == "\n":
         post = ""
-      print(pre,c,post,sep='',file=fd)
+      print(colored(pre,"green"),colored(c,"yellow"),colored(post,"green"),sep='',file=fd)
       g = re.search(r'.*$',pre)
       print(" " * len(g.group(0)),"^",sep='',file=fd)
       print(" " * len(g.group(0)),"| here",sep='',file=fd)
@@ -685,6 +684,7 @@ class Matcher:
       self.textPos = pos
       if pos > self.maxTextPos:
         self.maxTextPos = pos
+        self.max_stack = [k for k in self.stack]
         self.hash = {}
 
     def inc_pos(self):
@@ -692,6 +692,7 @@ class Matcher:
       pos = self.textPos
       if pos > self.maxTextPos:
         self.maxTextPos = pos
+        self.max_stack = [k for k in self.stack]
         self.hash = {}
 
     def matches(self):
@@ -708,6 +709,7 @@ class Matcher:
     def fail(self,c):
       if self.textPos > self.maxTextPos:
         self.maxTextPos = self.textPos
+        self.max_stack = [k for k in self.stack]
         self.hash = {}
       elif self.textPos == self.maxTextPos:
         pass
@@ -728,6 +730,7 @@ class Matcher:
         self.text = text
         self.textPos = 0
         self.maxTextPos = 0
+        self.max_stack = []
         self.pat = grammar.patterns[pname]
         self.g = grammar
         self.gr = Group(pname,text,0,len(text))
