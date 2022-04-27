@@ -79,6 +79,7 @@ from colored import colored
 
 grammar = r"""
 skipper=\b([ \t]|\\\n|\#.*)*
+s=\b([ \t\n]|\\\n|\#.*)*
 raw_word=(\\.|[^\\"'\t \n\$\#&\|;{}`()<>?*,])+
 dchar=[^"$\\]
 dlit=\\.
@@ -100,7 +101,12 @@ word={expand}{-worditemex}+|{-worditem}{-worditemex}*
 word2=({glob}|{redir}|{ml}|{var}|{math}|{subproc}|{raw_word}|{squote}|{dquote}|{bquote})
 words2={word2}+
 
-ending=(&&?|\|[\|&]?|;|\n|$)
+ending=(&&?|\|[\|&]?|;(?!;)|\n|$)
+esac=esac
+casepattern=[^ \t\)]*\)
+case=case {word} in{-s}{casepattern}
+case2=;;{-s}({esac}|{casepattern})
+
 fd_from=[0-9]+
 fd_to=&[0-9]+
 redir=({fd_from}|)>({fd_to}|)
@@ -111,7 +117,7 @@ subproc=\$\(( {cmd})* \)
 cmd=(( {word})+( {ending}|)|{ending})
 glob=\?|\*|\[.-.\]
 expand=[\{,\}]
-whole_cmd=( {func}|{cmd})* $
+whole_cmd=^( {func}| {case}| {case2}|{cmd})* $
 """
 pp,_ = parse_peg_src(grammar)
 
@@ -387,7 +393,11 @@ class Expando:
             streams = new_streams
         return final_streams
             
-def expand1(a,ex=None,i=0,sub=0):
+def expandCurly(a,ex=None,i=0,sub=0):
+    """
+    The expandCurly method expands out curly braces on the command line,
+    e.g. "echo {a,b}{c,d}" should produce "ac ad bc bd".
+    """
     if ex is None:
         ex = Expando()
     sub = 0
@@ -404,33 +414,6 @@ def expand1(a,ex=None,i=0,sub=0):
         else:
             ex.add_item(a[i])
     return ex
-
-def expand(a,i=0,sub=False):
-    items = []
-    streams = []
-    while i < len(a):
-        if isinstance(a[i], Group) and a[i].is_("expand"):
-            if a[i].substring() == "{":
-                sub_streams = expand(a,i+1,True)
-                new_streams = [] + streams
-                for s2 in sub_streams:
-                    new_streams += [items + s2]
-                return new_streams
-            elif a[i].substring() == ",":
-                if sub:
-                    streams += [items]
-                    items = []
-                else:
-                    items += [","]
-            elif a[i].substring() == "}":
-                if sub:
-                    pass #return streams + [items]
-                else:
-                    items += ["}"]
-        else:
-            items += [a[i]]
-        i += 1
-    return streams + [items]
 
 def fmatch(fn,pat,i1=0,i2=0):
     while True:
@@ -510,7 +493,10 @@ class shell:
     
     def __init__(self,stdout = sys.stdout, stderr = sys.stderr, stdin = sys.stdin):
         self.txt = ""
-        self.vars = {"?":"0", "PWD":os.path.realpath(os.getcwd()),"*":" ".join(sys.argv[2:])}
+        self.vars = {"?":"0", "PWD":os.path.realpath(os.getcwd()),"*":" ".join(sys.argv[2:]), "SHELL":os.path.realpath(sys.argv[0]), "PYSHELL":"1"}
+        for var in ["SHELL","PWD","PYSHELL"]:
+            if var in os.environ:
+                os.environ[var] = self.vars[var]
         self.stdin = stdin
         self.stdout = stdout
         self.stderr = stderr
@@ -518,12 +504,14 @@ class shell:
         self.cmds = []
         self.stack = []
         self.for_loops = []
+        self.case_stack = []
         self.funcs = {}
         self.output = ""
         self.error = ""
         self.save_in = []
         self.save_out = []
         self.last_ending = None
+        self.curr_ending = None
         self.last_pipe = None
     
     def lookup_var(self,gr):
@@ -597,8 +585,45 @@ class shell:
         if index < len(args) and args[index] == "]]":
             index += 1
             assert start == "[[", f"Mismatched braces: '{start}' and '{args[index]}'"
-        assert index == len(args), f"index: {index}, args={args}"
+        if start is not None:
+            assert index == len(args), f"index: {index}, args={args}"
         return evalresult
+
+    def do_case(self, gr):
+        word = self.case_stack[-1][0]
+        rpat = re.sub(r'\*','.*',gr.substring()[:-1])+'$'
+        self.case_stack[-1][1] = re.match(rpat,word)
+
+    def mkargs(self, k):
+        args = []
+        # Calling eval will cause $(...) etc. to be replaced.
+        ek = self.eval(k)
+        if k.has(0,"dquote") or k.has(0,"squote"):
+            pass
+        else:
+            # expand ~/ and ~username/. This should
+            # not happen to quoted values.
+            ek = expandtilde(ek)
+
+        # Now the tricky part. Evaluate {a,b,c} elements of the shell.
+        # This can result in multiple arguments being generated.
+        exk = expandCurly(ek).build_strs()
+        for nek in exk:
+            # Evaluate globs
+            nek = deglob(nek)
+            if type(nek) == str:
+                args += [nek]
+            elif type(nek) == list:
+                args += [""]
+                for kk in nek:
+                    if isinstance(kk,Space):
+                        args += [""]
+                    else:
+                        args[-1] += kk
+            else:
+                assert False
+
+        return args
 
     def eval(self, gr, index=-1,xending=None):
         r = self.eval_(gr,index,xending)
@@ -618,34 +643,7 @@ class shell:
             ending = None
             my_ending = None
             for c in gr.children:
-#                skip = False
-#                if ending == "&&" and self.vars["?"] != "0":
-#                    skip = True
-#                elif ending == "||" and self.vars["?"] == "0":
-#                    skip = True
-#                if c.has(-1,"ending"):
-#                    my_ending = c.has(-1).substring()
-#                if my_ending == "|":
-#                    new_pipes = os.pipe()
-#                else:
-#                    new_pipes = None
-
-#                if new_pipes is not None:
-#                    save_out = self.stdout
-#                    self.stdout = new_pipes[1]
-#                if pipes is not None:
-#                    save_in = self.stdin
-#                    self.stdin = pipes[0]
-#                if not skip:
-#                    result = self.eval(c,xending=my_ending)
                 result = self.eval(c,xending=my_ending)
-#                if new_pipes is not None:
-#                    self.stdout = save_out
-#                if pipes is not None:
-#                    self.stdin = save_in
-
-#                ending = my_ending
-#                pipes = new_pipes
             return result
         elif gr.is_("cmd"):
             #here("cmd:",gr.dump())
@@ -672,30 +670,7 @@ class shell:
             try:
                 for k in gr.children:
                     if not k.is_("ending") and not k.has(0,"redir"):
-                        ek = self.eval(k)
-                        if k.has(0,"dquote") or k.has(0,"squote"):
-                            pass
-                        else:
-                            ek = expandtilde(ek)
-                        #here(ek,k.dump())
-                        exk = expand1(ek).build_strs()
-                        #here("ex=>",str(ex1))
-                        #here("bs=",ex1.build_strs())
-                        #exk = expand(ek)
-                        for nek in exk:
-                            nek = deglob(nek)
-                            if type(nek) == str:
-                                args += [nek]
-                            elif type(nek) == list:
-                                #args += ["".join(nek)]
-                                args += [""]
-                                for kk in nek:
-                                    if isinstance(kk,Space):
-                                        args += [""]
-                                    else:
-                                        args[-1] += kk
-                            else:
-                                assert False
+                         args += self.mkargs(k)
     
                 if len(args)>0:
                     if args[0] == "do":
@@ -763,6 +738,9 @@ class shell:
                             self.stack += [("if",TFN(testresult))]
                     elif args[0] == "fi":
                         self.stack = self.stack[:-1]
+
+                    if args[0] == "case":
+                        return
                     
                     g = re.match(r'(\w+)=(.*)', args[0])
                     if g:
@@ -773,6 +751,11 @@ class shell:
     
                 if len(self.stack) > 0:
                     skip = not self.stack[-1][1]
+
+                if len(self.case_stack) > 0:
+                    if not self.case_stack[-1][1]:
+                        skip = True
+
                 if len(self.for_loops)>0:
                     f = self.for_loops[-1]
                     if f.index >= len(f.values):
@@ -794,7 +777,7 @@ class shell:
                     for c in self.funcs[args[0]]:
                         self.eval(c)
                     return []
-                elif args[0] not in ["if","then","else","fi","for","done"]:
+                elif args[0] not in ["if","then","else","fi","for","done","case","esac"]:
                     #if args[0] == "if":
                     #    self.stack += [("if",line)]
                     sout = self.stdout
@@ -813,6 +796,10 @@ class shell:
                                     args = re.split(r'\s+',first_line[2:].strip()) + args
                         except:
                             pass
+                    if not os.path.exists(args[0]):
+                        print(f"Command '{args[0]}' not found")
+                        self.vars["?"] = 1
+                        return ""
                     try:
                         p = PipeThread(args, stdin=self.stdin, stdout=sout, stderr=serr, universal_newlines=True)
                     except OSError as e:
@@ -858,6 +845,8 @@ class shell:
             for c in gr.children:
                 #s += self.eval(c)
                 cat(s, self.eval(c))
+            if gr.has(-1,"eword"):
+                here("eword found:",gr.dump())
             return s #"".join(s)
         elif gr.is_("raw_word"):
             return [unesc(gr.substring())]
@@ -921,13 +910,28 @@ class shell:
                 return None
             else:
                 raise Exception(f"{fd_from} and {fd_to}")
+        elif gr.is_("case"):
+            if gr.has(0,"word"):
+                args = self.mkargs(gr.group(0))
+                assert len(args)==1
+                self.case_stack += [[args[0],False]]
+            assert gr.has(-1,"casepattern")
+            self.do_case(gr.group(-1))
+        elif gr.is_("case2"):
+            if gr.has(0,"casepattern"):
+                self.do_case(gr.group(0))
+            elif gr.has(0,"esac"):
+                self.case_stack = self.case_stack[:-1]
+            else:
+                assert False
         else:
             here(gr.dump())
             raise Exception(gr.substring())
             return [gr.substring()]
 
     def run_text(self,txt):
-        #print(colored("="*50,"yellow"))
+        #here(colored("="*50,"yellow"))
+        #here(txt)
         txt = self.txt + txt
         if txt.endswith("\\\n"):
             self.txt = txt
