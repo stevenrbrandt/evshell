@@ -117,7 +117,7 @@ subproc=\$\(( {cmd})* \)
 cmd=(( {word})+( {ending}|)|{ending})
 glob=\?|\*|\[.-.\]
 expand=[\{,\}]
-whole_cmd=^( {func}| {case}| {case2}|{cmd})* $
+whole_cmd=^( ({func}|{case}|{case2}|{cmd}))* $
 """
 pp,_ = parse_peg_src(grammar)
 
@@ -765,6 +765,14 @@ class shell:
                 if len(args)==0:
                     return []
     
+                if args[0] == "exit":
+                    try:
+                        rc = int(args[1])
+                    except:
+                        rc = 1
+                    self.vars["?"] = str(rc)
+                    return []
+
                 if args[0] == "cd":
                     if len(args) == 1:
                         os.chdir(home)
