@@ -4,7 +4,7 @@
 # (2) Supercharge Jupyter: Allow in-process calling of bash from Python, save ENVIRON variables, etc.
 # (3) Call python functions from bash or bash functions from python
 from pwd import getpwnam
-from Piraha import parse_peg_src, Matcher, Group
+from Piraha import parse_peg_src, Matcher, Group, set_trace
 from subprocess import Popen, PIPE, STDOUT
 from pipe_threads import PipeThread
 import os
@@ -27,6 +27,11 @@ sys.stderr.flush()
 my_shell = os.path.realpath(sys.argv[0])
 
 Never = object()
+
+class ContinueException(Exception):
+    def __init__(self,message):
+        super().__init__(message)
+        self.message = message
 
 class TFN:
 
@@ -104,8 +109,8 @@ words2={word2}+
 ending=(&&?|\|[\|&]?|;(?!;)|\n|$)
 esac=esac
 casepattern=[^ \t\)]*\)
-case=case {word} in{-s}{casepattern}
-case2=;;{-s}({esac}|{casepattern})
+case=case {word} in({-s}{casepattern}|)
+case2=;;{-s}({esac}|{casepattern}|)
 
 fd_from=[0-9]+
 fd_to=&[0-9]+
@@ -739,9 +744,6 @@ class shell:
                     elif args[0] == "fi":
                         self.stack = self.stack[:-1]
 
-                    if args[0] == "case":
-                        return
-                    
                     g = re.match(r'(\w+)=(.*)', args[0])
                     if g:
                         varname = g.group(1)
@@ -948,6 +950,17 @@ class shell:
         #print(colored(txt,"cyan"))
         m = Matcher(pp, "whole_cmd", txt)
         if m.matches():
+            for gr in m.gr.children:
+                if gr.is_("case"):
+                    if not gr.has(-1,"casepattern"):
+                        self.txt = txt+'\n'
+                        return "CONTINUE"
+                elif gr.is_("case2"):
+                    if not gr.has(0):
+                        self.txt = txt+'\n'
+                        return "CONTINUE"
+                else:
+                    pass
             # here(m.gr.dump())
             if verbose:
                 print(colored(txt,"cyan"))

@@ -1,6 +1,13 @@
 import re
 import sys
 from colored import colored
+from here import here
+
+trace = False
+
+def set_trace(t):
+    global trace
+    trace = t
 
 indent = 0
 max_int = 2147483647
@@ -53,6 +60,8 @@ class Literal:
         if m.textPos >= len(m.text):
             return False
         c = m.text[m.textPos]
+        if trace:
+            here("trace:",c,self.c,m.stack)
         if c == self.c:
             m.inc_pos()
             return True
