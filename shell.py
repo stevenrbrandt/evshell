@@ -114,7 +114,8 @@ case2=;;{-s}({esac}|{casepattern}|)
 
 fd_from=[0-9]+
 fd_to=&[0-9]+
-redir=({fd_from}|)>({fd_to}|)
+ltgt=[<>]
+redir=({fd_from}|){ltgt}( {fd_to}| {word})
 ident=[a-zA-Z0-9][a-zA-Z0-9_]*
 ml=<< {ident}
 math=\$\(\((\)[^)]|[^)])*\)\)
@@ -499,9 +500,10 @@ class shell:
     def __init__(self,stdout = sys.stdout, stderr = sys.stderr, stdin = sys.stdin):
         self.txt = ""
         self.vars = {"?":"0", "PWD":os.path.realpath(os.getcwd()),"*":" ".join(sys.argv[2:]), "SHELL":os.path.realpath(sys.argv[0]), "PYSHELL":"1"}
-        for var in ["SHELL","PWD","PYSHELL"]:
+        for var in ["SHELL","PWD","PYSHELL","PATH"]:
             if var in os.environ:
-                os.environ[var] = self.vars[var]
+                self.vars[var] = os.environ[var]
+        self.exports = {"USER","HOME","LOGNAME","SHELL","PYSHELL","PATH"}
         self.stdin = stdin
         self.stdout = stdout
         self.stderr = stderr
@@ -519,11 +521,23 @@ class shell:
         self.curr_ending = None
         self.last_pipe = None
     
+    def set_var(self,vname,value):
+        self.allow_set_var(vname, value)
+        self.vars[vname] = value
+
+    def allow_read(self, fname):
+        pass
+
+    def allow_set_var(self,var,val):
+        pass
+
+    def allow_access_var(self,var):
+        pass
+
     def lookup_var(self,gr):
         varname = gr.has(0,"w").substring()
-        if varname in os.environ:
-            v = spaceout(re.split(r'\s+', os.environ[varname]))
-        elif varname in self.vars:
+        self.allow_access_var(varname)
+        if varname in self.vars:
             v = spaceout(re.split(r'\s+', self.vars[varname]))
         else:
             v = None
@@ -672,8 +686,12 @@ class shell:
                 self.save_in += [self.stdin]
                 self.stdin = self.last_pipe[0]
 
+            redir = None
             try:
                 for k in gr.children:
+                    if k.has(0,"redir"):
+                        redir = k.children[0]
+
                     if not k.is_("ending") and not k.has(0,"redir"):
                          args += self.mkargs(k)
     
@@ -692,10 +710,11 @@ class shell:
                             if g:
                                 varname = g.group(1)
                                 value = g.group(2)
-                                self.vars[varname] = value
-                                os.environ[varname] = value
+                                #self.vars[varname] = value
+                                self.set_var(varname,value)
+                                self.exports.add(value)
                             elif a in self.vars:
-                                os.environ[a] = self.vars[a]
+                                self.exports.add(value)
                         return
     
                     if args[0] == "for":
@@ -703,7 +722,8 @@ class shell:
                         assert args[2] == "in", "Syntax: for var in ..."
                         self.for_loops += [f]
                         if f.index < len(f.values):
-                            self.vars[f.variable] = f.values[f.index]
+                            #self.vars[f.variable] = f.values[f.index]
+                            self.set_var(f.variable, f.values[f.index])
                         return
     
                     if args[0] == "done":
@@ -713,7 +733,8 @@ class shell:
                         if len(f.values) > 1:
                             for ii in range(1,len(f.values)):
                                 f.index = ii
-                                self.vars[f.variable] = f.values[f.index]
+                                #self.vars[f.variable] = f.values[f.index]
+                                self.set_var(f.variable, f.values[f.index])
                                 for cmdnum in range(f.docmd,f.donecmd):
                                     self.eval(self.cmds[cmdnum], cmdnum)
                         self.for_loops = self.for_loops[:-1]
@@ -748,7 +769,8 @@ class shell:
                     if g:
                         varname = g.group(1)
                         value = g.group(2)
-                        self.vars[varname] = value
+                        #self.vars[varname] = value
+                        self.set_var(varname, value)
                         return
     
                 if len(self.stack) > 0:
@@ -780,7 +802,7 @@ class shell:
                         os.chdir(home)
                     else:
                         os.chdir(args[1])
-                    os.environ["PWD"] = os.getcwd()
+                    self.vars["PWD"] = os.getcwd()
                     return
     
                 if args[0] in self.funcs:
@@ -792,12 +814,21 @@ class shell:
                     #    self.stack += [("if",line)]
                     sout = self.stdout
                     serr = self.stderr
+                    sin = self.stdin
                     if not os.path.exists(args[0]):
-                        for path in os.environ.get("PATH",".").split(":"):
+                        for path in self.vars.get("PATH",".").split(":"):
                             full_path = os.path.join(path, args[0])
                             if os.path.exists(full_path):
                                 args[0] = full_path
                                 break
+                    if redir is not None:
+                        if redir.has(0,"ltgt"):
+                            ltgt = redir.group(0).substring()
+                            if redir.has(1,"word"):
+                                if ltgt == "<":
+                                    fname = redir.group(1).substring()
+                                    self.allow_read(fname)
+                                    sin = open(fname, "r")
                     if os.path.exists(args[0]):
                         try:
                             with open(args[0],"r") as fd:
@@ -811,10 +842,10 @@ class shell:
                         self.vars["?"] = 1
                         return ""
                     try:
-                        p = PipeThread(args, stdin=self.stdin, stdout=sout, stderr=serr, universal_newlines=True)
+                        p = PipeThread(args, stdin=sin, stdout=sout, stderr=serr, universal_newlines=True)
                     except OSError as e:
                         args = ["/bin/sh"]+args
-                        p = PipeThread(args, stdin=self.stdin, stdout=sout, stderr=serr, universal_newlines=True)
+                        p = PipeThread(args, stdin=sin, stdout=sout, stderr=serr, universal_newlines=True)
                     if xending == "|":
                         p.setDaemon(True)
                         p.start()
