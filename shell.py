@@ -114,7 +114,7 @@ case2=;;{-s}({esac}|{casepattern}|)
 
 fd_from=[0-9]+
 fd_to=&[0-9]+
-ltgt=[<>]
+ltgt=(<|>>|>)
 redir=({fd_from}|){ltgt}( {fd_to}| {word})
 ident=[a-zA-Z0-9][a-zA-Z0-9_]*
 ml=<< {ident}
@@ -528,6 +528,12 @@ class shell:
     def allow_read(self, fname):
         pass
 
+    def allow_write(self, fname):
+        pass
+
+    def allow_append(self, fname):
+        pass
+
     def allow_set_var(self,var,val):
         pass
 
@@ -810,8 +816,6 @@ class shell:
                         self.eval(c)
                     return []
                 elif args[0] not in ["if","then","else","fi","for","done","case","esac"]:
-                    #if args[0] == "if":
-                    #    self.stack += [("if",line)]
                     sout = self.stdout
                     serr = self.stderr
                     sin = self.stdin
@@ -821,14 +825,69 @@ class shell:
                             if os.path.exists(full_path):
                                 args[0] = full_path
                                 break
+
+                    # We don't have a way to tell Popen we want both
+                    # streams to go to stderr, so we add this flag
+                    # and swap the output and error output after the
+                    # command is run
+                    out_is_error = False
                     if redir is not None:
-                        if redir.has(0,"ltgt"):
-                            ltgt = redir.group(0).substring()
-                            if redir.has(1,"word"):
+                        fd_from = None
+                        rn = 0
+                        if redir.has(0,"fd_from"):
+                            fd_from = redir.children[0].substring()
+                            rn += 1
+                        if redir.has(rn,"ltgt"):
+                            ltgt = redir.group(rn).substring()
+                            if redir.has(rn+1,"word"):
+                                fname = redir.group(rn+1).substring()
                                 if ltgt == "<":
-                                    fname = redir.group(1).substring()
                                     self.allow_read(fname)
                                     sin = open(fname, "r")
+                                elif ltgt == ">":
+                                    self.allow_write(fname)
+                                    if fd_from is None or fd_from == "1":
+                                        sout = open(fname, "w")
+                                    elif fd_from == "2":
+                                        here("creating:",fname)
+                                        serr = open(fname, "w")
+                                    else:
+                                        assert False, redir.dump()
+                                elif ltgt == ">>":
+                                    self.allow_append(fname)
+                                    if fd_from is None or fd_from == "1":
+                                        sout = open(fname, "a")
+                                    elif fd_from == "2":
+                                        serr = open(fname, "a")
+                                    else:
+                                        assert False, redir.dump()
+                                else:
+                                    assert False, redir.dump()
+                            elif redir.has(rn+1,"fd_to"):
+                                if redir.group(rn+1).substring() == "&2":
+                                    assert fd_from is None or fd_from=="1"
+                                    if sout == -1 and serr == -1:
+                                        stderr = STDOUT
+                                        out_is_error = True
+                                    elif sout == -1 or serr == -1:
+                                        assert False
+                                    sout = serr
+                                elif redir.group(rn+1).substring() == "&1":
+                                    assert fd_from is None or fd_from=="2"
+                                    if sout == -1 and serr == -1:
+                                        stderr = STDOUT
+                                        here()
+                                    serr = sout
+                                else:
+                                    here(redir.dump())
+                                    raise Exception()
+                            else:
+                                here(redir.dump())
+                                raise Exception()
+                        else:
+                            here(redir.dump())
+                            raise Exception()
+
                     if os.path.exists(args[0]):
                         try:
                             with open(args[0],"r") as fd:
@@ -853,6 +912,8 @@ class shell:
                     else:
                         p.start()
                         o, e = p.communicate()
+                        if out_is_error:
+                            o, e = e, o
                         if type(o) == str:
                             self.output += o
                         if type(e) == str:
