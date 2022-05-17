@@ -833,6 +833,8 @@ class shell:
                     sin = self.stdin
                     if not os.path.exists(args[0]):
                         args[0] = which(args[0])
+                    if args[0] in ["/usr/bin/bash","/bin/bash","/bin/sh"]:
+                        args = [sys.executable,sys.argv[0]] + args[1:]
 
                     # We don't have a way to tell Popen we want both
                     # streams to go to stderr, so we add this flag
@@ -1121,10 +1123,18 @@ def interactive(shell):
 
 if __name__ == "__main__":
     s = shell()
-    if len(sys.argv) == 1:
+    ssh_cmd = os.environ.get("SSH_ORIGINAL_COMMAND",None)
+    if ssh_cmd is not None:
+        s.run_text(ssh_cmd)
+    elif len(sys.argv) == 1:
         rc = interactive(s)
         exit(rc)
     else:
-        for f in sys.argv[1:]:
-            with open(f,"r") as fd:
-                s.run_text(fd.read())
+        for n in range(1,len(sys.argv)):
+            f = sys.argv[n]
+            if f == "-c":
+                n += 1
+                s.run_text(sys.argv[n])
+            elif os.path.exists(f):
+                with open(f,"r") as fd:
+                    s.run_text(fd.read())
