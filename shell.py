@@ -1109,9 +1109,9 @@ def interactive(shell):
     msg = "EVAL"
     while True:
         if msg == "EVAL":
-            print(colored('shell> ','green'),end='')
+            print(colored('\U0001f370> ','yellow'),end='')
         else:
-            print(colored('>> ','green'),end='')
+            print(colored('\U0001f370? ','cyan'),end='')
         sys.stdout.flush()
         try:
             inp = input()
