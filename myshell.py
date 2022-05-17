@@ -8,7 +8,9 @@ from shutil import which
 
 # This example limits shell access to a handful of commands
 # and gives the user access only to files in the workpath or
-# in the home directory (read access only)
+# in the home directory (read access only).
+# In addition, it limits the number and size of arguments
+# supplied to any command in order to avoid buffer overrun.
 workpath = os.path.join("/tmp",os.environ["USER"])
 homepath = os.path.abspath(os.environ["HOME"])
 
@@ -76,9 +78,16 @@ add_cmd("cal",regex("[0-9]+"))
 add_cmd("pwd")
 
 def allow_cmd(args):
+    """
+    Validate the arguments supplied to any command
+    """
     allow = True
+    if len(args) > 20: # Limit the number of args to a command
+        return False
     if args[0] in allowed_cmds:
         for a in args[1:]:
+            if len(a) > 1024: # Limit each argument's size
+                return False
             found = False
             for p in allowed_cmds[args[0]]:
                 if type(p) == str:
