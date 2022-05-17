@@ -12,6 +12,7 @@ import sys
 import re
 from traceback import print_exc
 from here import here
+from shutil import which
 
 class ExitShell(Exception):
     def __init__(self, rc):
@@ -19,10 +20,6 @@ class ExitShell(Exception):
 
 import io
 home = os.environ["HOME"]
-log_file = os.path.join(home,"log_shell.txt")
-log_fd = io.TextIOWrapper(open(log_file,"ab",0), write_through=True)
-sys.stderr.flush()
-#sys.stderr = open(log_file,"ab",0)
 
 my_shell = os.path.realpath(sys.argv[0])
 
@@ -835,11 +832,7 @@ class shell:
                     serr = self.stderr
                     sin = self.stdin
                     if not os.path.exists(args[0]):
-                        for path in self.vars.get("PATH",".").split(":"):
-                            full_path = os.path.join(path, args[0])
-                            if os.path.exists(full_path):
-                                args[0] = full_path
-                                break
+                        args[0] = which(args[0])
 
                     # We don't have a way to tell Popen we want both
                     # streams to go to stderr, so we add this flag
@@ -921,6 +914,8 @@ class shell:
                     if not self.allow_cmd(args):
                         return ""
 
+                    self.log_fd.write(str(args)+"\n")
+                    self.log_fd.flush()
                     try:
                         p = PipeThread(args, stdin=sin, stdout=sout, stderr=serr, universal_newlines=True)
                     except OSError as e:
