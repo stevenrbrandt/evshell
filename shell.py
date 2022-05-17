@@ -3,7 +3,7 @@
 # (1) Security for Science Gateways
 # (2) Supercharge Jupyter: Allow in-process calling of bash from Python, save ENVIRON variables, etc.
 # (3) Call python functions from bash or bash functions from python
-from pwd import getpwnam
+from pwd import getpwnam, getpwuid
 from Piraha import parse_peg_src, Matcher, Group, set_trace
 from subprocess import Popen, PIPE, STDOUT
 from pipe_threads import PipeThread
@@ -500,10 +500,15 @@ class shell:
     def __init__(self,stdout = sys.stdout, stderr = sys.stderr, stdin = sys.stdin):
         self.txt = ""
         self.vars = {"?":"0", "PWD":os.path.realpath(os.getcwd()),"*":" ".join(sys.argv[2:]), "SHELL":os.path.realpath(sys.argv[0]), "PYSHELL":"1"}
-        for var in ["SHELL","PWD","PYSHELL","PATH"]:
-            if var in os.environ:
+        pwdata = getpwuid(os.getuid())
+        self.vars["USER"] = pwdata.pw_name
+        self.vars["LOGNAME"] = pwdata.pw_name
+        self.vars["HOME"] = pwdata.pw_dir
+        self.exports = set()
+        for var in os.environ:
+            if var not in self.vars:
                 self.vars[var] = os.environ[var]
-        self.exports = {"USER","HOME","LOGNAME","SHELL","PYSHELL","PATH"}
+            self.exports.add(var)
         self.stdin = stdin
         self.stdout = stdout
         self.stderr = stderr
@@ -520,29 +525,37 @@ class shell:
         self.last_ending = None
         self.curr_ending = None
         self.last_pipe = None
+        self.log_fd = open(os.path.join(self.vars["HOME"],"pieshell-log.txt"),"a")
     
     def set_var(self,vname,value):
-        self.allow_set_var(vname, value)
-        self.vars[vname] = value
+        if self.allow_set_var(vname, value):
+            self.vars[vname] = value
+
+    def allow_cd(self, dname):
+        return True
+
+    def allow_cmd(self, args):
+        return True
 
     def allow_read(self, fname):
-        pass
+        return True
 
     def allow_write(self, fname):
-        pass
+        return True
 
     def allow_append(self, fname):
-        pass
+        return True
 
     def allow_set_var(self,var,val):
-        pass
+        return True
 
     def allow_access_var(self,var):
-        pass
+        return True
 
     def lookup_var(self,gr):
         varname = gr.has(0,"w").substring()
-        self.allow_access_var(varname)
+        if not self.allow_access_var(varname):
+            return ""
         if varname in self.vars:
             v = spaceout(re.split(r'\s+', self.vars[varname]))
         else:
@@ -805,9 +818,11 @@ class shell:
 
                 if args[0] == "cd":
                     if len(args) == 1:
-                        os.chdir(home)
+                        if self.allow_cd(home):
+                            os.chdir(home)
                     else:
-                        os.chdir(args[1])
+                        if self.allow_cd(args[1]):
+                            os.chdir(args[1])
                     self.vars["PWD"] = os.getcwd()
                     return
     
@@ -842,20 +857,22 @@ class shell:
                             if redir.has(rn+1,"word"):
                                 fname = redir.group(rn+1).substring()
                                 if ltgt == "<":
-                                    self.allow_read(fname)
+                                    if not self.allow_read(fname):
+                                        fname = "/dev/null"
                                     sin = open(fname, "r")
                                 elif ltgt == ">":
-                                    self.allow_write(fname)
-                                    if fd_from is None or fd_from == "1":
+                                    if not self.allow_write(fname):
+                                        pass
+                                    elif fd_from is None or fd_from == "1":
                                         sout = open(fname, "w")
                                     elif fd_from == "2":
-                                        here("creating:",fname)
                                         serr = open(fname, "w")
                                     else:
                                         assert False, redir.dump()
                                 elif ltgt == ">>":
-                                    self.allow_append(fname)
-                                    if fd_from is None or fd_from == "1":
+                                    if not self.allow_append(fname):
+                                        pass
+                                    elif fd_from is None or fd_from == "1":
                                         sout = open(fname, "a")
                                     elif fd_from == "2":
                                         serr = open(fname, "a")
@@ -900,6 +917,10 @@ class shell:
                         print(f"Command '{args[0]}' not found")
                         self.vars["?"] = 1
                         return ""
+
+                    if not self.allow_cmd(args):
+                        return ""
+
                     try:
                         p = PipeThread(args, stdin=sin, stdout=sout, stderr=serr, universal_newlines=True)
                     except OSError as e:
@@ -1083,27 +1104,31 @@ class shell:
             exit(0)
             return "SYNTAX"
 
+def interactive(shell):
+    try:
+        import readline
+    except:
+        print(colored("Import of readline failed","red"))
+    msg = "EVAL"
+    while True:
+        if msg == "EVAL":
+            print(colored('shell> ','green'),end='')
+        else:
+            print(colored('>> ','green'),end='')
+        sys.stdout.flush()
+        try:
+            inp = input()
+            msg = shell.run_text(inp)
+        except KeyboardInterrupt as ke:
+            print(colored("Interrupt","red"))
+        except EOFError as ee:
+            return shell.vars["?"]
+
 if __name__ == "__main__":
     s = shell()
     if len(sys.argv) == 1:
-        try:
-            import readline
-        except:
-            print(colored("Import of readline failed","red"))
-        msg = "EVAL"
-        while True:
-            if msg == "EVAL":
-                print(colored('shell> ','green'),end='')
-            else:
-                print(colored('>> ','green'),end='')
-            sys.stdout.flush()
-            try:
-                inp = input()
-                msg = s.run_text(inp)
-            except KeyboardInterrupt as ke:
-                print(colored("Interrupt","red"))
-            except EOFError as ee:
-                exit(s.vars["?"])
+        rc = interactive(s)
+        exit(rc)
     else:
         for f in sys.argv[1:]:
             with open(f,"r") as fd:
