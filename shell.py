@@ -1101,12 +1101,12 @@ def interactive(shell):
     msg = "EVAL"
     while True:
         if msg == "EVAL":
-            print(colored('\U0001f370> ','yellow'),end='')
+            ps = colored('\U0001f370> ','yellow')
         else:
-            print(colored('\U0001f370? ','cyan'),end='')
+            ps = colored('\U0001f370? ','cyan')
         sys.stdout.flush()
         try:
-            inp = input()
+            inp = input(ps)
             msg = shell.run_text(inp)
         except KeyboardInterrupt as ke:
             print(colored("Interrupt","red"))
