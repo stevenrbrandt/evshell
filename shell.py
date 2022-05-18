@@ -572,7 +572,7 @@ class shell:
             return v
 
     def evaltest(self, args, index=0):
-        evalresult = False
+        evalresult = None
         if args[index] == "if":
             index += 1
         if args[index] in ["[[","["]:
@@ -621,7 +621,10 @@ class shell:
             index += 1
             assert start == "[[", f"Mismatched braces: '{start}' and '{args[index]}'"
         if start is not None:
-            assert index == len(args), f"index: {index}, args={args}"
+            pass #here(args)
+        if evalresult is None and args[0] == "if":
+            self.evalargs(args[1:], None, False, None, index, None)
+            evalresult = self.vars["?"] == "0"
         return evalresult
 
     def do_case(self, gr):
@@ -661,6 +664,7 @@ class shell:
         return args
 
     def eval(self, gr, index=-1,xending=None):
+        assert type(gr) != list
         r = self.eval_(gr,index,xending)
         if r is None:
             r = []
@@ -668,6 +672,7 @@ class shell:
         return r
 
     def eval_(self, gr, index=-1, xending=None):
+        assert type(gr) != list
         if index == -1 and not gr.is_("whole_cmd"):
             index = len(self.cmds)
             self.cmds += [gr]
@@ -703,258 +708,13 @@ class shell:
                 self.stdin = self.last_pipe[0]
 
             redir = None
-            try:
-                for k in gr.children:
-                    if k.has(0,"redir"):
-                        redir = k.children[0]
-
-                    if not k.is_("ending") and not k.has(0,"redir"):
-                         args += self.mkargs(k)
+            for k in gr.children:
+                if k.has(0,"redir"):
+                    redir = k.children[0]
+                if not k.is_("ending") and not k.has(0,"redir"):
+                     args += self.mkargs(k)
     
-                if len(args)>0:
-                    if args[0] == "do":
-                        f = self.for_loops[-1]
-                        if f.docmd == -1:
-                            f.docmd = index
-                        args = args[1:]
-                        if len(args) == 0:
-                            return
-    
-                    if args[0] == 'export':
-                        for a in args[1:]:
-                            g = re.match(r'^(\w+)=(.*)',a)
-                            if g:
-                                varname = g.group(1)
-                                value = g.group(2)
-                                #self.vars[varname] = value
-                                self.set_var(varname,value)
-                                self.exports.add(value)
-                            elif a in self.vars:
-                                self.exports.add(value)
-                        return
-    
-                    if args[0] == "for":
-                        f = For(args[1],args[3:])
-                        assert args[2] == "in", "Syntax: for var in ..."
-                        self.for_loops += [f]
-                        if f.index < len(f.values):
-                            #self.vars[f.variable] = f.values[f.index]
-                            self.set_var(f.variable, f.values[f.index])
-                        return
-    
-                    if args[0] == "done":
-                        f = self.for_loops[-1]
-                        assert f.docmd != -1
-                        f.donecmd = index
-                        if len(f.values) > 1:
-                            for ii in range(1,len(f.values)):
-                                f.index = ii
-                                #self.vars[f.variable] = f.values[f.index]
-                                self.set_var(f.variable, f.values[f.index])
-                                for cmdnum in range(f.docmd,f.donecmd):
-                                    self.eval(self.cmds[cmdnum], cmdnum)
-                        self.for_loops = self.for_loops[:-1]
-                        return
-    
-                    if args[0] == "then":
-                        args = args[1:]
-                        if len(args) == 0:
-                            return
-    
-                    elif args[0] == "else":
-                        args = args[1:]
-                        self.stack[-1][1].toggle()
-    
-                    if args[0] == "if":
-                        testresult = None
-                        if len(self.stack) > 0 and not self.stack[-1][1]:
-                            self.stack += [("if",TFN(Never))]
-                        else:
-                            # if [ a = b ] ;
-                            #  7 6 5 4 3 2 1
-                            # if [ a = b ] 
-                            #  6 5 4 3 2 1 
-                            testresult = self.evaltest(args)
-                            if testresult is None:
-                                print(gr.dump())
-                            self.stack += [("if",TFN(testresult))]
-                    elif args[0] == "fi":
-                        self.stack = self.stack[:-1]
-
-                    g = re.match(r'(\w+)=(.*)', args[0])
-                    if g:
-                        varname = g.group(1)
-                        value = g.group(2)
-                        #self.vars[varname] = value
-                        self.set_var(varname, value)
-                        return
-    
-                if len(self.stack) > 0:
-                    skip = not self.stack[-1][1]
-
-                if len(self.case_stack) > 0:
-                    if not self.case_stack[-1][1]:
-                        skip = True
-
-                if len(self.for_loops)>0:
-                    f = self.for_loops[-1]
-                    if f.index >= len(f.values):
-                        skip = True
-                if skip:
-                    return []
-                if len(args)==0:
-                    return []
-    
-                if args[0] == "exit":
-                    try:
-                        rc = int(args[1])
-                    except:
-                        rc = 1
-                    self.vars["?"] = str(rc)
-                    return []
-
-                if args[0] == "cd":
-                    if len(args) == 1:
-                        if self.allow_cd(home):
-                            os.chdir(home)
-                    else:
-                        if self.allow_cd(args[1]):
-                            os.chdir(args[1])
-                    self.vars["PWD"] = os.getcwd()
-                    return
-    
-                if args[0] in self.funcs:
-                    for c in self.funcs[args[0]]:
-                        self.eval(c)
-                    return []
-                elif args[0] not in ["if","then","else","fi","for","done","case","esac"]:
-                    sout = self.stdout
-                    serr = self.stderr
-                    sin = self.stdin
-                    if not os.path.exists(args[0]):
-                        args[0] = which(args[0])
-                    if args[0] in ["/usr/bin/bash","/bin/bash","/bin/sh"]:
-                        args = [sys.executable,sys.argv[0]] + args[1:]
-
-                    # We don't have a way to tell Popen we want both
-                    # streams to go to stderr, so we add this flag
-                    # and swap the output and error output after the
-                    # command is run
-                    out_is_error = False
-                    if redir is not None:
-                        fd_from = None
-                        rn = 0
-                        if redir.has(0,"fd_from"):
-                            fd_from = redir.children[0].substring()
-                            rn += 1
-                        if redir.has(rn,"ltgt"):
-                            ltgt = redir.group(rn).substring()
-                            if redir.has(rn+1,"word"):
-                                fname = redir.group(rn+1).substring()
-                                if ltgt == "<":
-                                    if not self.allow_read(fname):
-                                        fname = "/dev/null"
-                                    sin = open(fname, "r")
-                                elif ltgt == ">":
-                                    if not self.allow_write(fname):
-                                        pass
-                                    elif fd_from is None or fd_from == "1":
-                                        sout = open(fname, "w")
-                                    elif fd_from == "2":
-                                        serr = open(fname, "w")
-                                    else:
-                                        assert False, redir.dump()
-                                elif ltgt == ">>":
-                                    if not self.allow_append(fname):
-                                        pass
-                                    elif fd_from is None or fd_from == "1":
-                                        sout = open(fname, "a")
-                                    elif fd_from == "2":
-                                        serr = open(fname, "a")
-                                    else:
-                                        assert False, redir.dump()
-                                else:
-                                    assert False, redir.dump()
-                            elif redir.has(rn+1,"fd_to"):
-                                if redir.group(rn+1).substring() == "&2":
-                                    assert fd_from is None or fd_from=="1"
-                                    if sout == -1 and serr == -1:
-                                        stderr = STDOUT
-                                        out_is_error = True
-                                    elif sout == -1 or serr == -1:
-                                        assert False
-                                    sout = serr
-                                elif redir.group(rn+1).substring() == "&1":
-                                    assert fd_from is None or fd_from=="2"
-                                    if sout == -1 and serr == -1:
-                                        stderr = STDOUT
-                                        here()
-                                    serr = sout
-                                else:
-                                    here(redir.dump())
-                                    raise Exception()
-                            else:
-                                here(redir.dump())
-                                raise Exception()
-                        else:
-                            here(redir.dump())
-                            raise Exception()
-
-                    if os.path.exists(args[0]):
-                        try:
-                            with open(args[0],"r") as fd:
-                                first_line = fd.readline()
-                                if first_line.startswith("#!"):
-                                    args = re.split(r'\s+',first_line[2:].strip()) + args
-                        except:
-                            pass
-                    if not os.path.exists(args[0]):
-                        print(f"Command '{args[0]}' not found")
-                        self.vars["?"] = 1
-                        return ""
-
-                    if not self.allow_cmd(args):
-                        return ""
-
-                    self.log_fd.write(str(args)+"\n")
-                    self.log_fd.flush()
-                    try:
-                        p = PipeThread(args, stdin=sin, stdout=sout, stderr=serr, universal_newlines=True)
-                    except OSError as e:
-                        args = ["/bin/sh"]+args
-                        p = PipeThread(args, stdin=sin, stdout=sout, stderr=serr, universal_newlines=True)
-                    if xending == "|":
-                        p.setDaemon(True)
-                        p.start()
-                        return []
-                    else:
-                        p.start()
-                        o, e = p.communicate()
-                        if out_is_error:
-                            o, e = e, o
-                        if type(o) == str:
-                            self.output += o
-                        if type(e) == str:
-                            self.error += e
-                        self.vars["?"] = str(p.returncode)
-                        return o
-                return []
-#                if new_pipes is not None:
-#                    self.stdout = save_out
-#                if pipes is not None:
-#                    self.stdin = save_in
-
-#                ending = my_ending
-#                pipes = new_pipes
-            finally:
-                if self.curr_pipe is not None:
-                    self.stdout = self.save_out[-1]
-                    self.save_out = self.save_out[:-1]
-                if self.last_pipe is not None:
-                    self.stdin = self.save_in[-1]
-                    self.save_in = self.save_in[:-1]
-                self.last_ending = self.curr_ending
-                self.last_pipe = self.curr_pipe
+            return self.evalargs(args, redir, skip, xending, index, gr)
 
         elif gr.is_("glob"):
             return [gr]
@@ -1048,6 +808,238 @@ class shell:
             here(gr.dump())
             raise Exception(gr.substring())
             return [gr.substring()]
+
+    def evalargs(self, args, redir, skip, xending, index, gr):
+        try:
+            if len(args)>0:
+                if args[0] == "do":
+                    f = self.for_loops[-1]
+                    if f.docmd == -1:
+                        f.docmd = index
+                    args = args[1:]
+                    if len(args) == 0:
+                        return
+
+                if args[0] == 'export':
+                    for a in args[1:]:
+                        g = re.match(r'^(\w+)=(.*)',a)
+                        if g:
+                            varname = g.group(1)
+                            value = g.group(2)
+                            #self.vars[varname] = value
+                            self.set_var(varname,value)
+                            self.exports.add(value)
+                        elif a in self.vars:
+                            self.exports.add(value)
+                    return
+
+                if args[0] == "for":
+                    f = For(args[1],args[3:])
+                    assert args[2] == "in", "Syntax: for var in ..."
+                    self.for_loops += [f]
+                    if f.index < len(f.values):
+                        #self.vars[f.variable] = f.values[f.index]
+                        self.set_var(f.variable, f.values[f.index])
+                    return
+
+                if args[0] == "done":
+                    f = self.for_loops[-1]
+                    assert f.docmd != -1
+                    f.donecmd = index
+                    if len(f.values) > 1:
+                        for ii in range(1,len(f.values)):
+                            f.index = ii
+                            #self.vars[f.variable] = f.values[f.index]
+                            self.set_var(f.variable, f.values[f.index])
+                            for cmdnum in range(f.docmd,f.donecmd):
+                                self.eval(self.cmds[cmdnum], cmdnum)
+                    self.for_loops = self.for_loops[:-1]
+                    return
+
+                if args[0] == "then":
+                    args = args[1:]
+                    if len(args) == 0:
+                        return
+
+                elif args[0] == "else":
+                    args = args[1:]
+                    self.stack[-1][1].toggle()
+
+                if args[0] == "if":
+                    testresult = None
+                    if len(self.stack) > 0 and not self.stack[-1][1]:
+                        self.stack += [("if",TFN(Never))]
+                    else:
+                        # if [ a = b ] ;
+                        #  7 6 5 4 3 2 1
+                        # if [ a = b ] 
+                        #  6 5 4 3 2 1 
+                        testresult = self.evaltest(args)
+                        if testresult is None:
+                            pass #here(gr.dump())
+                        self.stack += [("if",TFN(testresult))]
+                elif args[0] == "fi":
+                    self.stack = self.stack[:-1]
+                g = re.match(r'(\w+)=(.*)', args[0])
+                if g:
+                    varname = g.group(1)
+                    value = g.group(2)
+                    #self.vars[varname] = value
+                    self.set_var(varname, value)
+                    return
+
+            if len(self.stack) > 0:
+                skip = not self.stack[-1][1]
+            if len(self.case_stack) > 0:
+                if not self.case_stack[-1][1]:
+                    skip = True
+            if len(self.for_loops)>0:
+                f = self.for_loops[-1]
+                if f.index >= len(f.values):
+                    skip = True
+            if skip:
+                return []
+            if len(args)==0:
+                return []
+
+            if args[0] == "exit":
+                try:
+                    rc = int(args[1])
+                except:
+                    rc = 1
+                self.vars["?"] = str(rc)
+                return []
+            if args[0] == "cd":
+                if len(args) == 1:
+                    if self.allow_cd(home):
+                        os.chdir(home)
+                else:
+                    if self.allow_cd(args[1]):
+                        os.chdir(args[1])
+                self.vars["PWD"] = os.getcwd()
+                return
+
+            if args[0] in self.funcs:
+                for c in self.funcs[args[0]]:
+                    self.eval(c)
+                return []
+            elif args[0] not in ["if","then","else","fi","for","done","case","esac"]:
+                sout = self.stdout
+                serr = self.stderr
+                sin = self.stdin
+                if not os.path.exists(args[0]):
+                    args[0] = which(args[0])
+                if args[0] in ["/usr/bin/bash","/bin/bash","/bin/sh"]:
+                    args = [sys.executable,sys.argv[0]] + args[1:]
+                # We don't have a way to tell Popen we want both
+                # streams to go to stderr, so we add this flag
+                # and swap the output and error output after the
+                # command is run
+                out_is_error = False
+                if redir is not None:
+                    fd_from = None
+                    rn = 0
+                    if redir.has(0,"fd_from"):
+                        fd_from = redir.children[0].substring()
+                        rn += 1
+                    if redir.has(rn,"ltgt"):
+                        ltgt = redir.group(rn).substring()
+                        if redir.has(rn+1,"word"):
+                            fname = redir.group(rn+1).substring()
+                            if ltgt == "<":
+                                if not self.allow_read(fname):
+                                    fname = "/dev/null"
+                                sin = open(fname, "r")
+                            elif ltgt == ">":
+                                if not self.allow_write(fname):
+                                    pass
+                                elif fd_from is None or fd_from == "1":
+                                    sout = open(fname, "w")
+                                elif fd_from == "2":
+                                    serr = open(fname, "w")
+                                else:
+                                    assert False, redir.dump()
+                            elif ltgt == ">>":
+                                if not self.allow_append(fname):
+                                    pass
+                                elif fd_from is None or fd_from == "1":
+                                    sout = open(fname, "a")
+                                elif fd_from == "2":
+                                    serr = open(fname, "a")
+                                else:
+                                    assert False, redir.dump()
+                            else:
+                                assert False, redir.dump()
+                        elif redir.has(rn+1,"fd_to"):
+                            if redir.group(rn+1).substring() == "&2":
+                                assert fd_from is None or fd_from=="1"
+                                if sout == -1 and serr == -1:
+                                    stderr = STDOUT
+                                    out_is_error = True
+                                elif sout == -1 or serr == -1:
+                                    assert False
+                                sout = serr
+                            elif redir.group(rn+1).substring() == "&1":
+                                assert fd_from is None or fd_from=="2"
+                                if sout == -1 and serr == -1:
+                                    stderr = STDOUT
+                                    here()
+                                serr = sout
+                            else:
+                                here(redir.dump())
+                                raise Exception()
+                        else:
+                            here(redir.dump())
+                            raise Exception()
+                    else:
+                        here(redir.dump())
+                        raise Exception()
+                if os.path.exists(args[0]):
+                    try:
+                        with open(args[0],"r") as fd:
+                            first_line = fd.readline()
+                            if first_line.startswith("#!"):
+                                args = re.split(r'\s+',first_line[2:].strip()) + args
+                    except:
+                        pass
+                if not os.path.exists(args[0]):
+                    print(f"Command '{args[0]}' not found")
+                    self.vars["?"] = 1
+                    return ""
+                if not self.allow_cmd(args):
+                    return ""
+                self.log_fd.write(str(args)+"\n")
+                self.log_fd.flush()
+                try:
+                    p = PipeThread(args, stdin=sin, stdout=sout, stderr=serr, universal_newlines=True)
+                except OSError as e:
+                    args = ["/bin/sh"]+args
+                    p = PipeThread(args, stdin=sin, stdout=sout, stderr=serr, universal_newlines=True)
+                if xending == "|":
+                    p.setDaemon(True)
+                    p.start()
+                    return []
+                else:
+                    p.start()
+                    o, e = p.communicate()
+                    if out_is_error:
+                        o, e = e, o
+                    if type(o) == str:
+                        self.output += o
+                    if type(e) == str:
+                        self.error += e
+                    self.vars["?"] = str(p.returncode)
+                    return o
+            return []
+        finally:
+            if self.curr_pipe is not None:
+                self.stdout = self.save_out[-1]
+                self.save_out = self.save_out[:-1]
+            if self.last_pipe is not None:
+                self.stdin = self.save_in[-1]
+                self.save_in = self.save_in[:-1]
+            self.last_ending = self.curr_ending
+            self.last_pipe = self.curr_pipe
 
     def run_text(self,txt):
         #here(colored("="*50,"yellow"))
