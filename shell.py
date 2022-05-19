@@ -118,9 +118,10 @@ ml=<< {ident}
 mathchar=(\)[^)]|[^)])
 math=\$\(\(({var}|{mathchar})*\)\)
 subproc=\$\(( {cmd})* \)
-cmd=(( {word})+( {ending}|)|{ending})
+cmd={subshell}|(( {word})+( {ending}|)|{ending})
 glob=\?|\*|\[.-.\]
 expand=[\{,\}]
+subshell=\(( {cmd})* \)
 whole_cmd=^( ({func}|{case}|{case2}|{cmd}))* $
 """
 pp,_ = parse_peg_src(grammar)
@@ -488,7 +489,7 @@ def expandtilde(s):
                 except:
                     pass
         return s
-    elif type(s) == list:
+    elif type(s) == list and len(s)>0:
         return [expandtilde(s[0])] + s[1:]
     else:
         return s
@@ -684,6 +685,8 @@ class shell:
             ending = None
             my_ending = None
             for c in gr.children:
+                if c.has(0,"ending"):
+                    continue
                 result = self.eval(c,xending=my_ending)
             return result
         elif gr.is_("cmd"):
@@ -715,6 +718,8 @@ class shell:
                 if not k.is_("ending") and not k.has(0,"redir"):
                      args += self.mkargs(k)
     
+            if args == ['']:
+                return args
             return self.evalargs(args, redir, skip, xending, index, gr)
 
         elif gr.is_("glob"):
@@ -809,9 +814,19 @@ class shell:
                 self.case_stack = self.case_stack[:-1]
             else:
                 assert False
+        elif gr.is_("subshell"):
+            pid = os.fork()
+            if pid == 0:
+                for gc in gr.children:
+                    self.eval(gc)
+                exit(int(self.vars["?"]))
+                raise Exception()
+            rc=os.waitpid(pid,0)
+            self.vars["?"] = str(rc[1])
+            return []
         else:
             here(gr.dump())
-            raise Exception(gr.substring())
+            raise Exception(gr.getPatternName()+": "+gr.substring())
             return [gr.substring()]
 
     def evalargs(self, args, redir, skip, xending, index, gr):
