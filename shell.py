@@ -115,7 +115,8 @@ ltgt=(<|>>|>)
 redir=({fd_from}|){ltgt}( {fd_to}| {word})
 ident=[a-zA-Z0-9][a-zA-Z0-9_]*
 ml=<< {ident}
-math=\$\(\((\)[^)]|[^)])*\)\)
+mathchar=(\)[^)]|[^)])
+math=\$\(\(({var}|{mathchar})*\)\)
 subproc=\$\(( {cmd})* \)
 cmd=(( {word})+( {ending}|)|{ending})
 glob=\?|\*|\[.-.\]
@@ -731,9 +732,13 @@ class shell:
         elif gr.is_("raw_word"):
             return [unesc(gr.substring())]
         elif gr.is_("math"):
-            ms = gr.substring()
-            ms = ms[3:-2]
-            return str(eval(ms)).strip()
+            mtxt = ''
+            for gc in gr.children:
+                if gc.is_("mathchar"):
+                    mtxt += gc.substring()
+                else:
+                    mtxt += self.lookup_var(gc)[0]
+            return str(eval(mtxt)).strip()
         elif gr.is_("func"):
             assert gr.children[0].is_("ident")
             ident = gr.children[0].substring()
@@ -1129,4 +1134,5 @@ if __name__ == "__main__":
                 s.run_text(sys.argv[n])
             elif os.path.exists(f):
                 with open(f,"r") as fd:
-                    s.run_text(fd.read())
+                    rc = s.run_text(fd.read())
+                    assert rc == "EVAL", f"rc={rc}"
