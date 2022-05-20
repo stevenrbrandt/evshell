@@ -93,8 +93,8 @@ unset=:-
 unset_raw=-
 rm_front=\#\#?
 rm_back=%%?
-wchar=[a-zA-Z0-9_@?$]
-w=[a-zA-Z0-9_@?$]+
+wchar=[@?$]
+w=[a-zA-Z0-9_]+
 var=\$({wchar}|{w}|\{({w}({unset}{words2}|{unset_raw}{raw_word}|{rm_front}{word2}|{rm_back}{word2}|))\})
 func=function {ident} \( \) \{( {cmd})* \}[ \t]*\n
 
@@ -700,7 +700,7 @@ class shell:
             index = len(self.cmds)
             self.cmds += [gr]
         if gr.is_("whole_cmd"):
-            #here("wc:",gr.dump())
+            # here("wc:",gr.dump())
             pipes = None
             result = []
             ending = None
@@ -840,6 +840,10 @@ class shell:
             if pid == 0:
                 for gc in gr.children:
                     self.eval(gc)
+                if type(self.stdout) != int:
+                    sys.stdout.flush()
+                if type(self.stderr) != int:
+                    sys.stderr.flush()
                 exit(int(self.vars["?"]))
                 raise Exception()
             rc=os.waitpid(pid,0)
@@ -1035,6 +1039,8 @@ class shell:
                     else:
                         here(redir.dump())
                         raise Exception()
+                if len(args) == 0 or args[0] is None:
+                    return ""
                 if os.path.exists(args[0]):
                     try:
                         with open(args[0],"r") as fd:

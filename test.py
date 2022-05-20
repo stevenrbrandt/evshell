@@ -85,13 +85,15 @@ function foo() {
 }
 
 foo''')
-#test('python3 ./x.py a b c')
+os.chdir('tests')
+test('python3 ./x.py a b c')
 os.environ['q'] = "a b c"
-#test('python3 ./x.py $q')
+test('python3 ./x.py $q')
 test('echo $(seq 1 10)')
 s.run_text('ls x*')
 s.run_text('ls a*')
 test('ls x.{py,sh}')
+os.chdir('..')
 test('''
 function zap() {
   echo x.{py,sh}
@@ -106,8 +108,10 @@ test("./a.sh || ./b.sh")
 test("./b.sh && ./a.sh")
 test("./b.sh || ./a.sh")
 for f in os.listdir("tests"):
+    if not f.endswith(".sh"):
+        continue
     ft = os.path.join("tests", f)
-    print("Running test file:", ft)
+    print(colored("Running test file:","cyan"), ft)
     with open(ft, "r") as fd:
         test(fd.read())
 here("All tests passed")
