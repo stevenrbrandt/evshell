@@ -85,9 +85,9 @@ function foo() {
 }
 
 foo''')
-test('python3 ./x.py a b c')
+#test('python3 ./x.py a b c')
 os.environ['q'] = "a b c"
-test('python3 ./x.py $q')
+#test('python3 ./x.py $q')
 test('echo $(seq 1 10)')
 s.run_text('ls x*')
 s.run_text('ls a*')
