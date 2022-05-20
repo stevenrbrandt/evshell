@@ -93,7 +93,6 @@ test('echo $(seq 1 10)')
 s.run_text('ls x*')
 s.run_text('ls a*')
 test('ls x.{py,sh}')
-os.chdir('..')
 test('''
 function zap() {
   echo x.{py,sh}
@@ -107,11 +106,10 @@ test("./a.sh && ./b.sh")
 test("./a.sh || ./b.sh")
 test("./b.sh && ./a.sh")
 test("./b.sh || ./a.sh")
-for f in os.listdir("tests"):
+for f in os.listdir("."):
     if not f.endswith(".sh"):
         continue
-    ft = os.path.join("tests", f)
-    print(colored("Running test file:","cyan"), ft)
-    with open(ft, "r") as fd:
+    print(colored("Running test file:","cyan"), f)
+    with open(f, "r") as fd:
         test(fd.read())
 here("All tests passed")
