@@ -95,8 +95,8 @@ rm_front=\#\#?
 rm_back=%%?
 wchar=[@?$]
 w=[a-zA-Z0-9_]+
-var=\$({wchar}|{w}|\{({w}({unset}{words2}|{unset_raw}{raw_word}|{rm_front}{word2}|{rm_back}{word2}|))\})
-func=function {ident} \( \) \{( {cmd})* \}[ \t]*\n
+var=\$({wchar}|{w}|\{(({w}|{wchar})({unset}{words2}|{unset_raw}{raw_word}|{rm_front}{word2}|{rm_back}{word2}|))\})
+func=function {ident} \( \) \{( {cmd})* \}({redir}|[ \t])*\n
 
 worditem=({glob}|{redir}|{ml}|{var}|{math}|{subproc}|{raw_word}|{squote}|{dquote}|{bquote})
 worditemex=({glob}|{redir}|{ml}|{var}|{math}|{subproc}|{raw_word}|{squote}|{dquote}|{bquote}|{expand})
@@ -532,6 +532,7 @@ class shell:
         self.log_fd.flush()
 
     def log_exc(self):
+        print_exc()
         print("=" * 10,datetime.now(),"=" * 10,file=self.log_fd)
         self.log_flush()
         print_exc(file=self.log_fd)
@@ -854,6 +855,67 @@ class shell:
             raise Exception(gr.getPatternName()+": "+gr.substring())
             return [gr.substring()]
 
+    def do_redir(self, redir, sout, serr, sin):
+        out_is_error = False
+        fd_from = None
+        rn = 0
+        if redir.has(0,"fd_from"):
+            fd_from = redir.children[0].substring()
+            rn += 1
+        if redir.has(rn,"ltgt"):
+            ltgt = redir.group(rn).substring()
+            if redir.has(rn+1,"word"):
+                fname = redir.group(rn+1).substring()
+                if ltgt == "<":
+                    if not self.allow_read(fname):
+                        fname = "/dev/null"
+                    sin = open(fname, "r")
+                elif ltgt == ">":
+                    if not self.allow_write(fname):
+                        pass
+                    elif fd_from is None or fd_from == "1":
+                        sout = open(fname, "w")
+                    elif fd_from == "2":
+                        serr = open(fname, "w")
+                    else:
+                        assert False, redir.dump()
+                elif ltgt == ">>":
+                    if not self.allow_append(fname):
+                        pass
+                    elif fd_from is None or fd_from == "1":
+                        sout = open(fname, "a")
+                    elif fd_from == "2":
+                        serr = open(fname, "a")
+                    else:
+                        assert False, redir.dump()
+                else:
+                    assert False, redir.dump()
+            elif redir.has(rn+1,"fd_to"):
+                if redir.group(rn+1).substring() == "&2":
+                    assert fd_from is None or fd_from=="1"
+                    if sout == -1 and serr == -1:
+                        stderr = STDOUT
+                        out_is_error = True
+                    elif sout == -1 or serr == -1:
+                        assert False
+                    sout = serr
+                elif redir.group(rn+1).substring() == "&1":
+                    assert fd_from is None or fd_from=="2"
+                    if sout == -1 and serr == -1:
+                        stderr = STDOUT
+                        here()
+                    serr = sout
+                else:
+                    here(redir.dump())
+                    raise Exception()
+            else:
+                here(redir.dump())
+                raise Exception()
+        else:
+            here(redir.dump())
+            raise Exception()
+        return sout, serr, sin, out_is_error
+
     def evalargs(self, args, redir, skip, xending, index, gr):
         try:
             if len(args)>0:
@@ -966,6 +1028,8 @@ class shell:
 
             if args[0] in self.funcs:
                 for c in self.funcs[args[0]]:
+                    if c.is_("redir"):
+                        continue
                     self.eval(c)
                 return []
             elif args[0] not in ["if","then","else","fi","for","done","case","esac"]:
@@ -982,63 +1046,7 @@ class shell:
                 # command is run
                 out_is_error = False
                 if redir is not None:
-                    fd_from = None
-                    rn = 0
-                    if redir.has(0,"fd_from"):
-                        fd_from = redir.children[0].substring()
-                        rn += 1
-                    if redir.has(rn,"ltgt"):
-                        ltgt = redir.group(rn).substring()
-                        if redir.has(rn+1,"word"):
-                            fname = redir.group(rn+1).substring()
-                            if ltgt == "<":
-                                if not self.allow_read(fname):
-                                    fname = "/dev/null"
-                                sin = open(fname, "r")
-                            elif ltgt == ">":
-                                if not self.allow_write(fname):
-                                    pass
-                                elif fd_from is None or fd_from == "1":
-                                    sout = open(fname, "w")
-                                elif fd_from == "2":
-                                    serr = open(fname, "w")
-                                else:
-                                    assert False, redir.dump()
-                            elif ltgt == ">>":
-                                if not self.allow_append(fname):
-                                    pass
-                                elif fd_from is None or fd_from == "1":
-                                    sout = open(fname, "a")
-                                elif fd_from == "2":
-                                    serr = open(fname, "a")
-                                else:
-                                    assert False, redir.dump()
-                            else:
-                                assert False, redir.dump()
-                        elif redir.has(rn+1,"fd_to"):
-                            if redir.group(rn+1).substring() == "&2":
-                                assert fd_from is None or fd_from=="1"
-                                if sout == -1 and serr == -1:
-                                    stderr = STDOUT
-                                    out_is_error = True
-                                elif sout == -1 or serr == -1:
-                                    assert False
-                                sout = serr
-                            elif redir.group(rn+1).substring() == "&1":
-                                assert fd_from is None or fd_from=="2"
-                                if sout == -1 and serr == -1:
-                                    stderr = STDOUT
-                                    here()
-                                serr = sout
-                            else:
-                                here(redir.dump())
-                                raise Exception()
-                        else:
-                            here(redir.dump())
-                            raise Exception()
-                    else:
-                        here(redir.dump())
-                        raise Exception()
+                    sout,serr,sin,out_is_error = self.do_redir(redir,sout,serr,sin)
                 if len(args) == 0 or args[0] is None:
                     return ""
                 if os.path.exists(args[0]):
