@@ -13,6 +13,7 @@ import re
 from traceback import print_exc
 from here import here
 from shutil import which
+from datetime import datetime
 
 class ExitShell(Exception):
     def __init__(self, rc):
@@ -92,8 +93,9 @@ unset=:-
 unset_raw=-
 rm_front=\#\#?
 rm_back=%%?
-w=[a-zA-Z0-9_]+
-var=\$({w}|\{({w}({unset}{words2}|{unset_raw}{raw_word}|{rm_front}{word2}|{rm_back}{word2}|))\})
+wchar=[a-zA-Z0-9_@?$]
+w=[a-zA-Z0-9_@?$]+
+var=\$({wchar}|{w}|\{({w}({unset}{words2}|{unset_raw}{raw_word}|{rm_front}{word2}|{rm_back}{word2}|))\})
 func=function {ident} \( \) \{( {cmd})* \}[ \t]*\n
 
 worditem=({glob}|{redir}|{ml}|{var}|{math}|{subproc}|{raw_word}|{squote}|{dquote}|{bquote})
@@ -526,6 +528,21 @@ class shell:
         self.last_pipe = None
         self.log_fd = open(os.path.join(self.vars["HOME"],"pieshell-log.txt"),"a")
     
+    def log_flush(self):
+        self.log_fd.flush()
+
+    def log_exc(self):
+        print("=" * 10,datetime.now(),"=" * 10,file=self.log_fd)
+        self.log_flush()
+        print_exc(file=self.log_fd)
+        self.log_flush()
+
+    def log(self,*args,**kwargs):
+        print("=" * 10,datetime.now(),"=" * 10,file=self.log_fd)
+        self.log_flush()
+        print(*args,**kwargs,file=self.log_fd)
+        self.log_flush()
+
     def set_var(self,vname,value):
         if self.allow_set_var(vname, value):
             self.vars[vname] = value
@@ -552,7 +569,11 @@ class shell:
         return True
 
     def lookup_var(self,gr):
-        varname = gr.has(0,"w").substring()
+        varname = gr.has(0).substring()
+        if varname == "$":
+            return str(os.getpid())
+        elif varname == "@":
+            return " ".join(sys.argv[1:])
         if not self.allow_access_var(varname):
             return ""
         if varname in self.vars:
@@ -1028,8 +1049,7 @@ class shell:
                     return ""
                 if not self.allow_cmd(args):
                     return ""
-                self.log_fd.write(str(args)+"\n")
-                self.log_fd.flush()
+                self.log("args:",args)
                 try:
                     p = PipeThread(args, stdin=sin, stdout=sout, stderr=serr, universal_newlines=True)
                 except OSError as e:
@@ -1064,6 +1084,7 @@ class shell:
     def run_text(self,txt):
         #here(colored("="*50,"yellow"))
         #here(txt)
+        self.log("txt:",txt)
         txt = self.txt + txt
         if txt.endswith("\\\n"):
             self.txt = txt
@@ -1103,14 +1124,15 @@ class shell:
             #print()
             #m.showError()
             #print("continue...")
+            self.log("CONTINUE")
             return "CONTNUE"
         else:
             self.txt = ''
-            print()
             m.showError()
             #m.showError(sys.stderr)
             here("done")
-            exit(0)
+            self.log("SYNTAX")
+            m.showError(self.log_fd)
             return "SYNTAX"
 
 def interactive(shell):
@@ -1137,9 +1159,17 @@ if __name__ == "__main__":
     s = shell()
     ssh_cmd = os.environ.get("SSH_ORIGINAL_COMMAND",None)
     if ssh_cmd is not None:
-        s.run_text(ssh_cmd)
+        try:
+            rc = s.run_text(ssh_cmd)
+            s.log("rc1:",rc)
+        except:
+            s.log_exc()
     elif len(sys.argv) == 1:
-        rc = interactive(s)
+        try:
+            rc = interactive(s)
+            s.log("rc2:",rc)
+        except:
+            s.log_exc()
         exit(rc)
     else:
         for n in range(1,len(sys.argv)):
@@ -1149,5 +1179,9 @@ if __name__ == "__main__":
                 s.run_text(sys.argv[n])
             elif os.path.exists(f):
                 with open(f,"r") as fd:
-                    rc = s.run_text(fd.read())
-                    assert rc == "EVAL", f"rc={rc}"
+                    try:
+                        rc = s.run_text(fd.read())
+                        s.log("rc3:",rc)
+                        assert rc == "EVAL", f"rc={rc}"
+                    except:
+                        s.log_exc()
