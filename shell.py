@@ -6,7 +6,7 @@
 from pwd import getpwnam, getpwuid
 from Piraha import parse_peg_src, Matcher, Group, set_trace
 from subprocess import Popen, PIPE, STDOUT
-from pipe_threads import PipeThread
+from pipe_threads import PipeThread, get_lastpid, get_running
 import os
 import sys
 import re
@@ -93,7 +93,7 @@ unset=:-
 unset_raw=-
 rm_front=\#\#?
 rm_back=%%?
-wchar=[@?$]
+wchar=[@?$!]
 w=[a-zA-Z0-9_]+
 var=\$({wchar}|{w}|\{(({w}|{wchar})({unset}{words2}|{unset_raw}{raw_word}|{rm_front}{word2}|{rm_back}{word2}|))\})
 func=function {ident} \( \) \{( {cmd})* \}({redir}|[ \t])*\n
@@ -573,6 +573,8 @@ class shell:
         varname = gr.has(0).substring()
         if varname == "$":
             return str(os.getpid())
+        elif varname == "!":
+            return str(get_lastpid())
         elif varname == "@":
             return " ".join(sys.argv[1:])
         if not self.allow_access_var(varname):
@@ -845,10 +847,12 @@ class shell:
                     sys.stdout.flush()
                 if type(self.stderr) != int:
                     sys.stderr.flush()
-                exit(int(self.vars["?"]))
+                code = int(self.vars["?"])
+                exit(code)
                 raise Exception()
             rc=os.waitpid(pid,0)
             self.vars["?"] = str(rc[1])
+            self.log("end subshell:",self.vars["?"])
             return []
         else:
             here(gr.dump())
@@ -935,9 +939,9 @@ class shell:
                             value = g.group(2)
                             #self.vars[varname] = value
                             self.set_var(varname,value)
-                            self.exports.add(value)
+                            self.exports.add(varname)
                         elif a in self.vars:
-                            self.exports.add(value)
+                            self.exports.add(varname)
                     return
 
                 if args[0] == "for":
@@ -1016,6 +1020,18 @@ class shell:
                     rc = 1
                 self.vars["?"] = str(rc)
                 return []
+            if args[0] == "wait":
+                result = None
+                try:
+                    pid, status = os.wait()
+                    p = get_running(pid)
+                    result = p.communicate()
+                except:
+                    p = get_running(None)
+                    if p is not None:
+                        result = p.communicate()
+                self.log("end wait:",self.vars["?"])
+                return []
             if args[0] == "cd":
                 if len(args) == 1:
                     if self.allow_cd(home):
@@ -1023,6 +1039,7 @@ class shell:
                 else:
                     if self.allow_cd(args[1]):
                         os.chdir(args[1])
+                self.log("chdir:",args[1])
                 self.vars["PWD"] = os.getcwd()
                 return
 
@@ -1038,8 +1055,8 @@ class shell:
                 sin = self.stdin
                 if not os.path.exists(args[0]):
                     args[0] = which(args[0])
-                if args[0] in ["/usr/bin/bash","/bin/bash","/bin/sh"]:
-                    args = [sys.executable,sys.argv[0]] + args[1:]
+                if args[0] in ["/usr/bin/bash","/bin/bash","/usr/bin/sh","/bin/sh"]:
+                    args = [sys.executable, my_shell] + args[1:]
                 # We don't have a way to tell Popen we want both
                 # streams to go to stderr, so we add this flag
                 # and swap the output and error output after the
@@ -1064,12 +1081,18 @@ class shell:
                 if not self.allow_cmd(args):
                     return ""
                 self.log("args:",args)
+                env = {}
+                for e in self.exports:
+                    env[e] = self.vars[e]
                 try:
-                    p = PipeThread(args, stdin=sin, stdout=sout, stderr=serr, universal_newlines=True)
+                    p = PipeThread(args, stdin=sin, stdout=sout, stderr=serr, universal_newlines=True, env=env)
                 except OSError as e:
                     args = ["/bin/sh"]+args
-                    p = PipeThread(args, stdin=sin, stdout=sout, stderr=serr, universal_newlines=True)
-                if xending == "|":
+                    p = PipeThread(args, stdin=sin, stdout=sout, stderr=serr, universal_newlines=True, env=env)
+                if self.curr_ending == "&":
+                    p.background()
+                    p.start()
+                elif xending == "|":
                     p.setDaemon(True)
                     p.start()
                     return []
@@ -1083,6 +1106,7 @@ class shell:
                     if type(e) == str:
                         self.error += e
                     self.vars["?"] = str(p.returncode)
+                    self.log("end cmd:",self.vars["?"],self.output,self.error)
                     return o
             return []
         finally:
@@ -1197,5 +1221,8 @@ if __name__ == "__main__":
                         rc = s.run_text(fd.read())
                         s.log("rc3:",rc)
                         assert rc == "EVAL", f"rc={rc}"
+                    except SystemExit as sc:
+                        # Calling exit sends you here
+                        pass
                     except:
                         s.log_exc()
