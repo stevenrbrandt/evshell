@@ -1,4 +1,4 @@
-from shell import shell, interactive
+from shell import shell, run_shell
 import os
 import re
 import sys
@@ -81,6 +81,10 @@ def allow_cmd(args):
     """
     Validate the arguments supplied to any command
     """
+    if args[0] == "/usr/libexec/openssh/sftp-server":
+        args[0] = "/project/sbrandt/c/openssh-portable/sftp-server"
+        return [args[0]]
+
     allow = True
     if len(args) > 20: # Limit the number of args to a command
         return False
@@ -138,10 +142,4 @@ if __name__ == "__main__":
     # Limit commands that may be run
     s.allow_cmd = allow_cmd
 
-    if len(sys.argv) == 1:
-        rc = interactive(s)
-        exit(rc)
-    else:
-        for f in sys.argv[1:]:
-            with open(f,"r") as fd:
-                s.run_text(fd.read())
+    run_shell(s)

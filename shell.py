@@ -1193,8 +1193,7 @@ def interactive(shell):
         except EOFError as ee:
             return shell.vars["?"]
 
-if __name__ == "__main__":
-    s = shell()
+def run_shell(s):
     ssh_cmd = os.environ.get("SSH_ORIGINAL_COMMAND",None)
     if ssh_cmd is not None:
         try:
@@ -1226,3 +1225,7 @@ if __name__ == "__main__":
                         pass
                     except:
                         s.log_exc()
+
+if __name__ == "__main__":
+    s = shell()
+    run_shell(s)
