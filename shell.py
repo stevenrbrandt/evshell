@@ -32,6 +32,9 @@ class ContinueException(Exception):
         self.message = message
 
 class TFN:
+    """
+    This class has values of True, False, and Never.
+    """
 
     def __init__(self, b):
         if b in [True, False]:
@@ -44,6 +47,10 @@ class TFN:
             self.b = Never
 
     def toggle(self):
+        """
+        Toggling turns True to False, False to True,
+        and leaves Never alone.
+        """
         if self.b == True:
             self.b = False
         elif self.b == False:
@@ -60,6 +67,9 @@ class TFN:
             return False
 
 def unesc(s):
+    """
+    Remove one level of escapes (backslashes) from a string.
+    """
     s2 = ""
     i = 0
     while i < len(s):
@@ -72,11 +82,6 @@ def unesc(s):
     return s2
 
 verbose = False
-
-sftp_default = "/usr/libexec/openssh/sftp-server"
-sftp = os.environ.get("SFTP",sftp_default)
-
-exe_dir = re.sub(r'/*$','/',os.environ.get("EXE_DIR",os.path.join(os.environ["HOME"],"exe")))
 
 from colored import colored
 
@@ -129,6 +134,11 @@ whole_cmd=^( ({func}|{case}|{case2}|{cmd}))* $
 pp,_ = parse_peg_src(grammar)
 
 class For:
+    """
+    A data structure used to keep track of
+    the information needed to implement
+    for loops.
+    """
     def __init__(self,variable,values):
         self.variable = variable
         self.values = values
@@ -138,64 +148,17 @@ class For:
     def __repr__(self):
         return f"For({self.variable},{self.values},{self.docmd},{self.donecmd})"
 
-class WordIter:
-    def __init__(self, a):
-        self.a = a
-        self.index = -1
-        self.iter = 1
-        self.s = ""
-        self.is_glob = False
-        self.c = None
-
-    def copy(self, w):
-        self.a = w.a
-        self.index = w.index
-        self.iter = w.iter
-        self.s = w.s
-        self.is_glob = w.is_glob
-        self.c = w.c
-
-    def __repr__(self):
-        return f"{self.index}/{len(self.a)} i={self.iter}/{len(self.s)} s='{self.s}'"
-
-    def sets(self):
-        if isinstance(self.a[self.index],Group):
-            self.is_glob = True
-            self.s = self.a[self.index].substring()
-        else:
-            self.is_glob = False
-            self.s = self.a[self.index]
-            assert type(self.s) == str
-
-    def decr(self):
-        assert self.iter > 0
-        self.iter -= 1
-
-    def incr(self):
-        while True:
-            if self.iter >= len(self.s):
-                if self.index+1 < len(self.a):
-                    self.index += 1
-                    self.iter = 0
-                    self.sets()
-                    continue
-                else:
-                    here('-Done2-')
-                    return False
-            self.c = self.s[self.iter]
-            self.iter += 1
-            here("-Iter-")
-            return True
-
-        if self.index >= len(self.a):
-            here("-Done-")
-            return False
-
 class Space:
+    """
+    This class represents a literal space
+    """
     def __repr__(self):
         return " "
 
 def spaceout(a):
+    """
+    Put a space between each member of a list
+    """
     b = []
     for i in range(len(a)):
         if i > 0:
@@ -203,63 +166,10 @@ def spaceout(a):
         b += [a[i]]
     return b
 
-def deglobw(w,j=0):
-    files = None
-    while w.incr():
-        here(files)
-        if not w.is_glob:
-            if files is None:
-                if w.c == '/':
-                    files = os.listdir('/') + ["."] + [".."]
-                    for f in range(len(files)):
-                        files = "/" + files[f]
-                else:
-                    files = os.listdir('.') + ["."] + [".."]
-            here(files)
-            new_files = []
-            delj = 0
-            for f in files:
-                if j < len(f) and f[j] == w.c:
-                    delj = 1
-                    new_files += [f]
-                elif w.c == '/' and len(f) == j:
-                    for k in os.listdir(f):
-                        new_files += [f+'/'+k]
-                    w.decr()
-            j += delj
-            files = new_files
-        elif w.c == '?':
-            new_files = []
-            delj = 0
-            for k in files:
-                if j < len(k):
-                    delj = 1
-                    new_files += [k]
-            here("j:",j,delj)
-            j += delj
-            files = new_files
-        elif w.c == '*':
-            if not w.incr():
-                return files
-            else:
-                w.decr()
-        else:
-            here()
-            files = []
-            break
-    here('fin')
-    if w.incr():
-        here()
-        files = []
-    new_files = []
-    for f in files:
-        if j == len(f):
-            new_files += [f]
-    files = new_files
-    return files
-
 def deglob(a):
-
+    """
+    Process a file glob
+    """
     assert type(a) == list
     has_glob = False
     for k in a:
@@ -277,10 +187,6 @@ def deglob(a):
             raw += ks
         elif isinstance(k,Group) and k.is_("expand"):
             here("remove this")
-            #ks = k.substring()
-            #for c in ks:
-            #    s += [(c,)]
-            #raw += ks
         elif type(k) == str:
             for c in k:
                 s += [(c,)]
@@ -293,69 +199,10 @@ def deglob(a):
     else:
         return spaceout(files)
 
-def deglob__(a):
-    assert type(a) == list
-    has_glob = False
-    for k in a:
-        if isinstance(k, Group):
-            has_glob = True
-    if not has_glob:
-        return a
-    w = WordIter(a)
-    print("*" * 20)
-    while w.incr():
-        here("w.c:",w.c,"w.is_glob:",w.is_glob)
-    print("*" * 20)
-    w = WordIter(a)
-    files = deglobw(w)
-    for f in files:
-        print(colored("->","green"),f)
-    here("done")
-    exit(0)
-
-def deglob_(a):
-    assert type(a) == list
-    has_glob = False
-    for k in a:
-        if isinstance(k, Group):
-            has_glob = True
-    if not has_glob:
-        return a
-    raw = ''
-    s = r'^'
-    for k in a:
-        if isinstance(k, Group):
-            ss = k.substring()
-            raw += ss
-            if ss == "*":
-                s += ".*"
-            elif ss == "?":
-                s += ".?"
-            elif ss[0] == '[':
-                s += ss
-            elif ss[0] == '{':
-                s += "(" + ss[1:-1].replace(",","|") + ")"
-            else:
-                assert False
-        elif type(k) == str:
-            raw += k
-            for c in k:
-                if re.match(r'^[a-zA-Z0-9_]$', c):
-                    s += c
-                else:
-                    s += '\\'+c
-        else:
-            assert False
-    s += '$'
-    res = []
-    for f in os.listdir('.'):
-        if re.match(s, f):
-            res += [f]
-    if len(res) == 0:
-        return [raw]
-    return res
-
 class Expando:
+    """
+    Bookkeeping class used by expandCurly.
+    """
     def __init__(self):
         self.a = [[]]
         self.parent = None
@@ -423,6 +270,9 @@ def expandCurly(a,ex=None,i=0,sub=0):
     return ex
 
 def fmatch(fn,pat,i1=0,i2=0):
+    """
+    Used by deglob() in processing globs in filenames.
+    """
     while True:
         if fn is None:
             result = []
@@ -445,9 +295,11 @@ def fmatch(fn,pat,i1=0,i2=0):
         elif i2 >= len(pat):
             return []
         elif pat[i2][0] == 'g?':
+            # g? is a glob ? pattern
             i1 += 1
             i2 += 1
         elif pat[i2][0] == 'g*':
+            # g* is a glob * pattern
             if i2+1 <= len(pat):
                 result = fmatch(fn, pat, i1, i2+1)
             else:
@@ -464,11 +316,9 @@ def fmatch(fn,pat,i1=0,i2=0):
         else:
             return []
 
-
 def cat(a, b):
     assert type(a) == list
     if type(b) == list:
-        #a[-1] += b[0]
         a += b
     elif type(b) == str:
         if len(a) == 0:
@@ -598,6 +448,9 @@ class shell:
             return v
 
     def evaltest(self, args, index=0):
+        """
+        Process calls to `test` or `if`, optimizing in some cases.
+        """
         evalresult = None
         if args[index] == "if":
             index += 1
@@ -659,6 +512,10 @@ class shell:
         self.case_stack[-1][1] = re.match(rpat,word)
 
     def mkargs(self, k):
+        """
+        k: An input of type Piraha.Group.
+        return value: a list of strings
+        """
         args = []
         # Calling eval will cause $(...) etc. to be replaced.
         ek = self.eval(k)
@@ -753,11 +610,10 @@ class shell:
         elif gr.is_("word") or gr.is_("word2") or gr.is_("words2"):
             s = []
             for c in gr.children:
-                #s += self.eval(c)
                 cat(s, self.eval(c))
             if gr.has(-1,"eword"):
                 here("eword found:",gr.dump())
-            return s #"".join(s)
+            return s 
         elif gr.is_("raw_word"):
             return [unesc(gr.substring())]
         elif gr.is_("math"):
@@ -979,6 +835,9 @@ class shell:
                 if args[0] == "if":
                     testresult = None
                     if len(self.stack) > 0 and not self.stack[-1][1]:
+                        # initialize the if stack with never.
+                        # Until a conditional is evaluated,
+                        # it is not true.
                         self.stack += [("if",TFN(Never))]
                     else:
                         # if [ a = b ] ;
@@ -1206,6 +1065,7 @@ def run_shell(s):
             rc = interactive(s)
             s.log("rc2:",rc)
         except:
+            rc = 1
             s.log_exc()
         exit(rc)
     else:
