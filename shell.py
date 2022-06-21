@@ -350,6 +350,7 @@ class shell:
     
     def __init__(self,stdout = sys.stdout, stderr = sys.stderr, stdin = sys.stdin):
         self.txt = ""
+        self.flags = {}
         self.vars = {"?":"0", "PWD":os.path.realpath(os.getcwd()),"*":" ".join(sys.argv[2:]), "SHELL":os.path.realpath(sys.argv[0]), "PYSHELL":"1"}
         pwdata = getpwuid(os.getuid())
         self.vars["USER"] = pwdata.pw_name
@@ -402,6 +403,14 @@ class shell:
         self.log_flush()
         print(*args,**kwargs,file=self.log_fd)
         self.log_flush()
+
+    def unset_var(self,vname):
+        if self.allow_set_var(vname, None):
+            del self.vars[vname]
+            try:
+                self.exports.remove(vname)
+            except KeyError as ke:
+                pass
 
     def set_var(self,vname,value):
         if self.allow_set_var(vname, value):
@@ -970,6 +979,24 @@ class shell:
                     for k in save:
                         self.vars[k] = save[k]
                 return []
+            elif args[0] == "unset":
+                for a in args[1:]:
+                    self.unset_var(a)
+                return
+            elif args[0] == "set":
+                for a in args[1:]:
+                    if a[0] == '-':
+                        for c in a[1:]:
+                            self.flags[c] = True
+                    elif a[0] == '+':
+                        for c in a[1:]:
+                            self.flags[c] = False
+                return
+            elif args[0] in ["source", "."]:
+                assert len(args)==2
+                with open(args[1],"r") as fd:
+                    self.run_text(fd.read())
+                    return
             elif args[0] not in ["if","then","else","fi","for","done","case","esac"]:
                 sout = self.stdout
                 serr = self.stderr
@@ -979,7 +1006,7 @@ class shell:
                     if args0 is not None:
                         args0 = os.path.abspath(args0)
                         args[0] = args0
-                if args[0] in ["/usr/bin/bash","/bin/bash","/usr/bin/sh","/bin/sh","source"]:
+                if args[0] in ["/usr/bin/bash","/bin/bash","/usr/bin/sh","/bin/sh"]:
                     args = [sys.executable, my_shell] + args[1:]
                 # We don't have a way to tell Popen we want both
                 # streams to go to stderr, so we add this flag
