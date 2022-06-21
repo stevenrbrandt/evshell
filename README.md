@@ -1,7 +1,5 @@
 # Pieshell
 
-WARNING: Under construction!
-
 Pieshell is an implementation of most of the bash shell features in Python. One of the main goals is to provide a fine-grained limitation of what users are allowed to do. It's also just fun.
 
 Demo:
