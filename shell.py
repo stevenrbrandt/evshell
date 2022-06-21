@@ -277,7 +277,7 @@ def fmatch(fn,pat,i1=0,i2=0):
         if fn is None:
             result = []
             if pat[0] == ('/',):
-                for d in os.listdir(fp):
+                for d in os.listdir(fn):
                     result += fmatch('/'+d, pat, 1, 1)
             else:
                 for d in os.listdir('.'):
@@ -975,8 +975,11 @@ class shell:
                 serr = self.stderr
                 sin = self.stdin
                 if not os.path.exists(args[0]):
-                    args[0] = os.path.abspath(which(args[0]))
-                if args[0] in ["/usr/bin/bash","/bin/bash","/usr/bin/sh","/bin/sh"]:
+                    args0 = which(args[0])
+                    if args0 is not None:
+                        args0 = os.path.abspath(args0)
+                        args[0] = args0
+                if args[0] in ["/usr/bin/bash","/bin/bash","/usr/bin/sh","/bin/sh","source"]:
                     args = [sys.executable, my_shell] + args[1:]
                 # We don't have a way to tell Popen we want both
                 # streams to go to stderr, so we add this flag
