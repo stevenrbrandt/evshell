@@ -355,6 +355,13 @@ class shell:
         self.vars["USER"] = pwdata.pw_name
         self.vars["LOGNAME"] = pwdata.pw_name
         self.vars["HOME"] = pwdata.pw_dir
+
+        # Command line args
+        args = sys.argv[2:]
+        self.vars["@"] = " ".join(args)
+        for vnum in range(len(args)):
+            self.vars[str(vnum+1)] = args[vnum]
+
         self.exports = set()
         for var in os.environ:
             if var not in self.vars:
@@ -376,6 +383,8 @@ class shell:
         self.last_ending = None
         self.curr_ending = None
         self.last_pipe = None
+        self.recursion = 0
+        self.max_recursion_depth = 20
         self.log_fd = open(os.path.join(self.vars["HOME"],"pieshell-log.txt"),"a")
     
     def log_flush(self):
@@ -420,13 +429,20 @@ class shell:
         return True
 
     def lookup_var(self,gr):
+        """
+        lookup_var() converts a Piraha.Group to a list of strings.
+        The output needs to be a list so that code like this runs
+        correctly:
+        ```
+        a="1 2 3"
+        for i in $a; do echo $i; done
+        ```
+        """
         varname = gr.has(0).substring()
         if varname == "$":
-            return str(os.getpid())
+            return [str(os.getpid())]
         elif varname == "!":
-            return str(get_lastpid())
-        elif varname == "@":
-            return " ".join(sys.argv[1:])
+            return [str(get_lastpid())]
         if not self.allow_access_var(varname):
             return ""
         if varname in self.vars:
@@ -443,7 +459,7 @@ class shell:
             if len(v) > 0 and v[0].endswith(back):
                 v[0] = v[0][:-len(back)]
         if v is None:
-            return ""
+            return [""]
         else:
             return v
 
@@ -623,21 +639,31 @@ class shell:
                     mtxt += gc.substring()
                 else:
                     mtxt += self.lookup_var(gc)[0]
-            return str(eval(mtxt)).strip()
+            try:
+                return str(eval(mtxt)).strip()
+            except:
+                return f"ERROR({mtxt})"
         elif gr.is_("func"):
             assert gr.children[0].is_("ident")
             ident = gr.children[0].substring()
             self.funcs[ident] = gr.children[1:]
         elif gr.is_("subproc"):
-            result = ""
-            o,e = self.output, self.error
-            for c in gr.children:
-                save = self.stdout
-                self.stdout = PIPE
-                self.output, self.error = "", ""
-                result = self.eval(c)
-                self.stdout = save
-            self.output, self.error = o, e
+            out_pipe = os.pipe()
+            pid = os.fork()
+            if pid == 0:
+                os.close(1)
+                os.dup(out_pipe[1])
+                self.stdout = 1
+                os.close(out_pipe[0])
+                os.close(out_pipe[1])
+                for c in gr.children:
+                    self.eval(c)
+                exit(int(self.vars["?"]))
+            assert pid != 0
+            os.close(out_pipe[1])
+            result = os.read(out_pipe[0],10000).decode()
+            os.close(out_pipe[0])
+            rc=os.waitpid(pid,0)
             return spaceout(re.split(r'\s+',result.strip()))
         elif gr.is_("dquote"):
             s = ""
@@ -695,17 +721,23 @@ class shell:
             else:
                 assert False
         elif gr.is_("subshell"):
+            out_pipe = os.pipe()
             pid = os.fork()
             if pid == 0:
+                os.close(1)
+                self.stdout = 1
+                os.dup(out_pipe[1])
+                os.close(out_pipe[0])
+                os.close(out_pipe[1])
                 for gc in gr.children:
                     self.eval(gc)
-                if type(self.stdout) != int:
-                    sys.stdout.flush()
-                if type(self.stderr) != int:
-                    sys.stderr.flush()
                 code = int(self.vars["?"])
                 exit(code)
                 raise Exception()
+            os.close(out_pipe[1])
+            out = os.read(out_pipe[0],10000).decode()
+            os.close(out_pipe[0])
+            sys.stdout.write(out)
             rc=os.waitpid(pid,0)
             self.vars["?"] = str(rc[1])
             self.log("end subshell:",self.vars["?"])
@@ -831,6 +863,8 @@ class shell:
                 elif args[0] == "else":
                     args = args[1:]
                     self.stack[-1][1].toggle()
+                    if len(args) == 0:
+                        return
 
                 if args[0] == "if":
                     testresult = None
@@ -903,17 +937,45 @@ class shell:
                 return
 
             if args[0] in self.funcs:
-                for c in self.funcs[args[0]]:
-                    if c.is_("redir"):
-                        continue
-                    self.eval(c)
+                # Invoke a function
+                try:
+                    save = {}
+                    for vnum in range(1,1000): #self.max_args):
+                        vname = str(vnum)
+                        if vname in self.vars:
+                            save[vname] = self.vars[vname]
+                        else:
+                            break
+                    save["@"] = self.vars["@"]
+                    for vnum in range(1,len(args)):
+                        vname = str(vnum)
+                        self.vars[vname] = args[vnum]
+                    self.vars["@"] = " ".join(args[1:])
+                    for c in self.funcs[args[0]]:
+                        if c.is_("redir"):
+                            continue
+                        self.recursion += 1
+                        try:
+                            assert self.recursion < self.max_recursion_depth, f"Max recursion depth {self.max_recursion_depth} exceeded"
+                            self.eval(c)
+                        finally:
+                            self.recursion -= 1
+                finally:
+                    for vnum in range(1,1000): #self.max_args):
+                        vname = str(vnum)
+                        if vname in self.vars:
+                            save[vname] = self.vars[vname]
+                        else:
+                            break
+                    for k in save:
+                        self.vars[k] = save[k]
                 return []
             elif args[0] not in ["if","then","else","fi","for","done","case","esac"]:
                 sout = self.stdout
                 serr = self.stderr
                 sin = self.stdin
                 if not os.path.exists(args[0]):
-                    args[0] = which(args[0])
+                    args[0] = os.path.abspath(which(args[0]))
                 if args[0] in ["/usr/bin/bash","/bin/bash","/usr/bin/sh","/bin/sh"]:
                     args = [sys.executable, my_shell] + args[1:]
                 # We don't have a way to tell Popen we want both
@@ -1064,6 +1126,8 @@ def run_shell(s):
         try:
             rc = interactive(s)
             s.log("rc2:",rc)
+        except SystemExit as se:
+            rc = se.code
         except:
             rc = 1
             s.log_exc()
