@@ -15,9 +15,16 @@ from here import here
 from shutil import which
 from datetime import datetime
 
-class ExitShell(Exception):
+# The way exit works is to raise SystemExit,
+# which may be caught. When we want to exit our
+# simulated shell, we should raise ShellExit
+# instead.
+class ShellExit(Exception):
     def __init__(self, rc):
         self.rc = rc
+
+def shell_exit(rc):
+    raise ShellExit(rc)
 
 import io
 home = os.environ["HOME"]
@@ -338,7 +345,7 @@ def expandtilde(s):
                     pw = getpwnam(g.group(1))
                     if pw is not None:
                         return pw.pw_dir+"/"+g.group(2)
-                except:
+                except Exception as ee:
                     pass
         return s
     elif type(s) == list and len(s)>0:
@@ -349,6 +356,7 @@ def expandtilde(s):
 class shell:
     
     def __init__(self,stdout = sys.stdout, stderr = sys.stderr, stdin = sys.stdin):
+        self.scriptname = "bash"
         self.txt = ""
         self.flags = {}
         self.vars = {"?":"0", "PWD":os.path.realpath(os.getcwd()),"*":" ".join(sys.argv[2:]), "SHELL":os.path.realpath(sys.argv[0]), "PYSHELL":"1"}
@@ -377,8 +385,6 @@ class shell:
         self.for_loops = []
         self.case_stack = []
         self.funcs = {}
-        self.output = ""
-        self.error = ""
         self.save_in = []
         self.save_out = []
         self.last_ending = None
@@ -415,6 +421,8 @@ class shell:
     def set_var(self,vname,value):
         if self.allow_set_var(vname, value):
             self.vars[vname] = value
+            if self.flags.get("a",False):
+                self.exports.add(vname)
 
     def allow_cd(self, dname):
         return True
@@ -650,7 +658,7 @@ class shell:
                     mtxt += self.lookup_var(gc)[0]
             try:
                 return str(eval(mtxt)).strip()
-            except:
+            except Exception as ee:
                 return f"ERROR({mtxt})"
         elif gr.is_("func"):
             assert gr.children[0].is_("ident")
@@ -741,15 +749,17 @@ class shell:
                 for gc in gr.children:
                     self.eval(gc)
                 code = int(self.vars["?"])
-                exit(code)
-                raise Exception()
+                exit(int(self.vars["?"]))
             os.close(out_pipe[1])
             out = os.read(out_pipe[0],10000).decode()
-            os.close(out_pipe[0])
+            # Why is this wrong?
+            #os.close(out_pipe[0])
             sys.stdout.write(out)
             rc=os.waitpid(pid,0)
             self.vars["?"] = str(rc[1])
             self.log("end subshell:",self.vars["?"])
+            if self.vars["?"] != "0" and self.flags.get("e",False):
+                shell_exit(int(self.vars["?"]))
             return []
         else:
             here(gr.dump())
@@ -816,6 +826,10 @@ class shell:
             here(redir.dump())
             raise Exception()
         return sout, serr, sin, out_is_error
+
+    def update_env(self):
+        for name in self.exports:
+            os.environ[name] = self.vars[name]
 
     def evalargs(self, args, redir, skip, xending, index, gr):
         try:
@@ -918,9 +932,10 @@ class shell:
             if args[0] == "exit":
                 try:
                     rc = int(args[1])
-                except:
+                except Exception as ee:
                     rc = 1
                 self.vars["?"] = str(rc)
+                shell_exit(int(self.vars["?"]))
                 return []
             if args[0] == "wait":
                 result = None
@@ -928,7 +943,7 @@ class shell:
                     pid, status = os.wait()
                     p = get_running(pid)
                     result = p.communicate()
-                except:
+                except Exception as ee:
                     p = get_running(None)
                     if p is not None:
                         result = p.communicate()
@@ -1023,16 +1038,21 @@ class shell:
                             first_line = fd.readline()
                             if first_line.startswith("#!"):
                                 args = re.split(r'\s+',first_line[2:].strip()) + args
-                    except:
+                    except Exception as ee:
                         pass
                 if not os.path.exists(args[0]):
-                    print(f"Command '{args[0]}' not found")
+                    fno = gr.linenum()
+                    print(f"{self.scriptname}: line {fno}: {args[0]}: command not found",file=self.stderr)
                     self.vars["?"] = 1
+                    if self.flags.get("e",False):
+                        shell_exit(1)
                     return ""
                 if not self.allow_cmd(args):
                     return ""
                 self.log("args:",args)
                 env = {}
+                if self.flags.get("x",False):
+                    self.stderr.write("+ "+" ".join(args)+"\n")
                 for e in self.exports:
                     env[e] = self.vars[e]
                 try:
@@ -1049,16 +1069,12 @@ class shell:
                     return []
                 else:
                     p.start()
-                    o, e = p.communicate()
-                    if out_is_error:
-                        o, e = e, o
-                    if type(o) == str:
-                        self.output += o
-                    if type(e) == str:
-                        self.error += e
+                    p.communicate()
                     self.vars["?"] = str(p.returncode)
-                    self.log("end cmd:",self.vars["?"],self.output,self.error)
-                    return o
+                    self.log("end cmd:",self.vars["?"])
+                    if self.vars["?"] != "0" and self.flags.get("e",False):
+                        shell_exit(int(self.vars["?"]))
+                    return None
             return []
         finally:
             if self.curr_pipe is not None:
@@ -1070,9 +1086,24 @@ class shell:
             self.last_ending = self.curr_ending
             self.last_pipe = self.curr_pipe
 
+    def run_file(self,fname):
+        with open(fname, "r") as fd:
+            self.scriptname = fname
+            return self.run_text(fd.read())
+
     def run_text(self,txt):
+        try:
+            s1 = self.stdout
+            s2 = self.stderr
+            return self.run_text_(txt)
+        except ShellExit as se:
+            self.vars["?"] = str(se.rc)
+        finally:
+            self.stdout = s1
+            self.stderr = s2
+
+    def run_text_(self,txt):
         #here(colored("="*50,"yellow"))
-        #here(txt)
         self.log("txt:",txt)
         txt = self.txt + txt
         if txt.endswith("\\\n"):
@@ -1127,7 +1158,7 @@ class shell:
 def interactive(shell):
     try:
         import readline
-    except:
+    except Exception as ee:
         print(colored("Import of readline failed","red"))
     msg = "EVAL"
     while True:
@@ -1150,15 +1181,16 @@ def run_shell(s):
         try:
             rc = s.run_text(ssh_cmd)
             s.log("rc1:",rc)
-        except:
+        except Exception as ee:
             s.log_exc()
     elif len(sys.argv) == 1:
         try:
             rc = interactive(s)
             s.log("rc2:",rc)
-        except SystemExit as se:
-            rc = se.code
-        except:
+        except ShellExit as se:
+            rc = se.rc
+            exit(rc)
+        except Exception as ee:
             rc = 1
             s.log_exc()
         exit(rc)
@@ -1174,10 +1206,10 @@ def run_shell(s):
                         rc = s.run_text(fd.read())
                         s.log("rc3:",rc)
                         assert rc == "EVAL", f"rc={rc}"
-                    except SystemExit as sc:
-                        # Calling exit sends you here
-                        pass
-                    except:
+                    except ShellExit as se:
+                        rc = se.rc
+                        exit(rc)
+                    except Exception as ee:
                         s.log_exc()
 
 if __name__ == "__main__":

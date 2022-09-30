@@ -1,32 +1,63 @@
-from shell import shell
+from shell import shell, ShellExit
 import sys, re, os
 from subprocess import Popen, PIPE
 from here import here
 from colored import colored
+from tmpfile import tmpfile
 
 s = shell()
 
-def test(cmd):
+def test(cmd,fname=None):
     varsave = {}
+    outsave = s.stdout
+    errsave = s.stderr
+    insave = s.stdin
+    flags = s.flags.copy()
     for k in s.vars:
         varsave[k] = s.vars[k]
     try:
         print(colored("TEST","blue"),cmd)
-        s.stdout = PIPE
-        s.stderr = PIPE
-        s.output = ""
-        s.error = ""
-        s.run_text(cmd)
-        p = Popen(["bash","-c",cmd],universal_newlines=True,stdout=PIPE,stderr=PIPE)
+
+        # First, bash...
+        if fname is None:
+            pcmd = ["bash","-c",cmd]
+        else:
+            pcmd = ["bash",fname]
+        p = Popen(pcmd,universal_newlines=True,stdout=PIPE,stderr=PIPE)
         o, e = p.communicate()
-        print("   bash: (",colored(re.sub(r'\n',r'\\n',o),"green"),")",sep='')
-        print("piebash: (",colored(re.sub(r'\n',r'\\n',s.output),"magenta"),")",sep='')
-        assert o == s.output
-        assert e == s.error, f"<{e}> != <{s.error}>"
+
+        # Second, piebash...
+        fd1 = tmpfile()
+        s.stdout = fd1
+
+        fd2 = tmpfile()
+        s.stderr = fd2
+
+        s.stdin = open("/dev/null","r")
+        if fname is None:
+            s.run_text(cmd)
+        else:
+            s.run_file(fname)
+        o2, e2 = fd1.getvalue(), fd2.getvalue()
+        try:
+            print("   bash: (",colored(re.sub(r'\n',r'\\n',o),"green"),")",sep='')
+            print("piebash: (",colored(re.sub(r'\n',r'\\n',o2),"magenta"),")",sep='')
+        except BrokenPipeError as bpe:
+            with open("/dev/tty","w") as fd:
+                here("Broken pipe!",file=fd)
+                print("   bash: (",colored(re.sub(r'\n',r'\\n',o),"green"),")",sep='',file=fd)
+                print("piebash: (",colored(re.sub(r'\n',r'\\n',o2),"magenta"),")",sep='',file=fd)
+        assert o == o2
+        assert e == e2, f"<{e}> != <{e2}>"
+        here("test passed")
     finally:
         s.vars = {}
         for k in varsave:
             s.vars[k] = varsave[k]
+        s.stdout = outsave
+        s.stderr = errsave
+        s.stdin = insave
+        s.flags = flags
 
 
 skip = False
@@ -111,5 +142,5 @@ for f in os.listdir("."):
         continue
     print(colored("Running test file:","cyan"), f)
     with open(f, "r") as fd:
-        test(fd.read())
+        test(fd.read(),fname=f)
 here("All tests passed")

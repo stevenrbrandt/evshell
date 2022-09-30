@@ -1,7 +1,7 @@
-echo foo > x
-echo bar >> x
-cat < x
-rm -f x
+echo foo > x.tmp
+echo bar >> x.tmp
+cat < x.tmp
+rm -f x.tmp
 echo word1 >&2
 echo word2 1>&2
 ls xxzxx 2>err.out
