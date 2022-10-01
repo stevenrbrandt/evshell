@@ -14,6 +14,7 @@ from traceback import print_exc
 from here import here
 from shutil import which
 from datetime import datetime
+from tmpfile import tmpfile
 
 # The way exit works is to raise SystemExit,
 # which may be caught. When we want to exit our
@@ -90,7 +91,7 @@ def unesc(s):
 
 verbose = False
 
-from colored import colored
+from colored import colored, is_jupyter
 
 grammar = r"""
 skipper=\b([ \t]|\\\n|\#.*)*
@@ -355,7 +356,7 @@ def expandtilde(s):
 
 class shell:
     
-    def __init__(self,stdout = sys.stdout, stderr = sys.stderr, stdin = sys.stdin):
+    def __init__(self,stdout = None, stderr = None, stdin = None):
         self.scriptname = "bash"
         self.txt = ""
         self.flags = {}
@@ -675,7 +676,7 @@ class shell:
                 os.close(out_pipe[1])
                 for c in gr.children:
                     self.eval(c)
-                exit(int(self.vars["?"]))
+                os._exit(int(self.vars["?"]))
             assert pid != 0
             os.close(out_pipe[1])
             result = os.read(out_pipe[0],10000).decode()
@@ -749,12 +750,14 @@ class shell:
                 for gc in gr.children:
                     self.eval(gc)
                 code = int(self.vars["?"])
-                exit(int(self.vars["?"]))
+                os._exit(int(self.vars["?"]))
             os.close(out_pipe[1])
             out = os.read(out_pipe[0],10000).decode()
-            # Why is this wrong?
-            #os.close(out_pipe[0])
-            sys.stdout.write(out)
+            os.close(out_pipe[0])
+            if type(self.stdout) == int:
+                os.write(self.stdout, out.encode())
+            else:
+                self.stdout.write(out)
             rc=os.waitpid(pid,0)
             self.vars["?"] = str(rc[1])
             self.log("end subshell:",self.vars["?"])
@@ -814,7 +817,6 @@ class shell:
                     assert fd_from is None or fd_from=="2"
                     if sout == -1 and serr == -1:
                         stderr = STDOUT
-                        here()
                     serr = sout
                 else:
                     here(redir.dump())
@@ -1093,12 +1095,30 @@ class shell:
 
     def run_text(self,txt):
         try:
+            s0 = self.stdin
             s1 = self.stdout
             s2 = self.stderr
+            if s0 is None:
+                self.stdin = open("/dev/null")
+            if s1 is None:
+                if is_jupyter:
+                    self.stdout = tmpfile()
+                else:
+                    self.stdout = sys.stdout
+            if s2 is None:
+                if is_jupyter:
+                    self.stderr = tmpfile()
+                else:
+                    self.stderr = sys.stderr
             return self.run_text_(txt)
         except ShellExit as se:
             self.vars["?"] = str(se.rc)
         finally:
+            if s1 is None and is_jupyter:
+                print(self.stdout.getvalue(),end='')
+            if s2 is None and is_jupyter:
+                print(colored(self.stderr.getvalue(),"red"),end='')
+            self.stdin = s0
             self.stdout = s1
             self.stderr = s2
 

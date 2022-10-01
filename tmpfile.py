@@ -29,7 +29,6 @@ class tmpfile:
         return self.fd.isatty()
     def getvalue(self):
         if self.is_open:
-            #here("close",depth=0)
             self.close()
         with open(self.fname,"r") as fd:
             return fd.read()
