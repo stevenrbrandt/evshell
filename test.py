@@ -7,6 +7,20 @@ from tmpfile import tmpfile
 
 s = shell()
 
+os.environ["A"] = "B"
+s.bind_to_env()
+s.run_text("export A=C")
+assert os.environ["A"] == "C"
+os.environ["A"] = "D"
+save_io = s.stdout
+s.stdout = tmpfile()
+s.run_text("echo $A")
+sv = s.stdout.getvalue()
+assert sv.strip() == "D"
+s.stdout = save_io
+
+s.unbind_from_env()
+
 def test(cmd,fname=None):
     varsave = {}
     outsave = s.stdout
@@ -37,7 +51,10 @@ def test(cmd,fname=None):
         if fname is None:
             s.run_text(cmd)
         else:
-            s.run_file(fname)
+            try:
+                s.run_file(fname)
+            except ShellExit as se:
+                pass
         o2, e2 = fd1.getvalue(), fd2.getvalue()
         try:
             print("   bash: (",colored(re.sub(r'\n',r'\\n',o),"green"),")",sep='')

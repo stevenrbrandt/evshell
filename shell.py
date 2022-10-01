@@ -372,11 +372,11 @@ class shell:
         for vnum in range(len(args)):
             self.vars[str(vnum+1)] = args[vnum]
 
-        self.exports = set()
+        self.exports = {}
         for var in os.environ:
             if var not in self.vars:
                 self.vars[var] = os.environ[var]
-            self.exports.add(var)
+            self.exports[var] = self.vars[var]
         self.stdin = stdin
         self.stdout = stdout
         self.stderr = stderr
@@ -395,6 +395,22 @@ class shell:
         self.max_recursion_depth = 20
         self.log_fd = open(os.path.join(self.vars["HOME"],"pieshell-log.txt"),"a")
     
+    def env_is_bound(self):
+        return os.environ is self.exports
+
+    def bind_to_env(self):
+        assert self.exports is not os.environ
+        for v in os.environ:
+            self.vars[v] = os.environ[v]
+        self.exports = os.environ
+
+    def unbind_from_env(self):
+        assert self.exports is os.environ
+        new_exports = {}
+        for v in os.environ:
+            new_exports[v] = self.vars[v] =  os.environ[v]
+        self.exports = new_exports
+
     def log_flush(self):
         self.log_fd.flush()
 
@@ -415,15 +431,21 @@ class shell:
         if self.allow_set_var(vname, None):
             del self.vars[vname]
             try:
-                self.exports.remove(vname)
+                del self.exports[vname]
             except KeyError as ke:
                 pass
+
+    def get_var(self,vname):
+        if vname in self.exports:
+            return self.exports[vname]
+        else:
+            return self.vars.get(vname,"")
 
     def set_var(self,vname,value):
         if self.allow_set_var(vname, value):
             self.vars[vname] = value
             if self.flags.get("a",False):
-                self.exports.add(vname)
+                self.exports[vname] = value
 
     def allow_cd(self, dname):
         return True
@@ -464,7 +486,7 @@ class shell:
         if not self.allow_access_var(varname):
             return ""
         if varname in self.vars:
-            v = spaceout(re.split(r'\s+', self.vars[varname]))
+            v = spaceout(re.split(r'\s+', self.get_var(varname)))
         else:
             v = None
         if v is None and gr.has(1,"unset"):
@@ -850,11 +872,10 @@ class shell:
                         if g:
                             varname = g.group(1)
                             value = g.group(2)
-                            #self.vars[varname] = value
                             self.set_var(varname,value)
-                            self.exports.add(varname)
+                            self.exports[varname] = value
                         elif a in self.vars:
-                            self.exports.add(varname)
+                            self.exports[a] = self.vars[a]
                     return
 
                 if args[0] == "for":
@@ -1056,7 +1077,7 @@ class shell:
                 if self.flags.get("x",False):
                     self.stderr.write("+ "+" ".join(args)+"\n")
                 for e in self.exports:
-                    env[e] = self.vars[e]
+                    env[e] = self.exports[e]
                 try:
                     p = PipeThread(args, stdin=sin, stdout=sout, stderr=serr, universal_newlines=True, env=env)
                 except OSError as e:
@@ -1111,8 +1132,6 @@ class shell:
                 else:
                     self.stderr = sys.stderr
             return self.run_text_(txt)
-        except ShellExit as se:
-            self.vars["?"] = str(se.rc)
         finally:
             if s1 is None and is_jupyter:
                 print(self.stdout.getvalue(),end='')
