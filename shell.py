@@ -420,6 +420,7 @@ class shell:
             self.err(e)
         if sout is None:
             return open("/dev/null", rwa)
+        self.stdrr.flush()
         return sout
     
     def env_is_bound(self):
@@ -1273,7 +1274,7 @@ def run_shell(s):
                 n += 1
                 s.run_text(sys.argv[n])
             elif os.path.exists(f):
-                with self.open_file(f,"r",1) as fd:
+                with s.open_file(f,"r",1) as fd:
                     try:
                         rc = s.run_text(fd.read())
                         s.log("rc3:",rc)
