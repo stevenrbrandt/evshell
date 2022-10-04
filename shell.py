@@ -10,6 +10,7 @@ from pipe_threads import PipeThread, get_lastpid, get_running
 import os
 import sys
 import re
+import io
 from traceback import print_exc
 from here import here
 from shutil import which
@@ -24,8 +25,29 @@ class ShellExit(Exception):
     def __init__(self, rc):
         self.rc = rc
 
+# This exception is thrown for an access
+# violation.
+class ShellAccess(Exception):
+    def __init__(self, msg):
+        self.msg = msg
+    def __str__(self):
+        return "SHELL ACCESS: "+self.msg
+
 def shell_exit(rc):
     raise ShellExit(rc)
+
+def err(e):
+    print(colored(str(e),"red"),file=sys.stderr)
+
+def open_file(fname, rwa):
+    sout = None
+    try:
+        return open(fname, rwa)
+    except OSError as e:
+        err(e)
+    if sout is None:
+        return open("/dev/null", rwa)
+    return sout
 
 import io
 home = os.environ["HOME"]
@@ -428,8 +450,12 @@ class shell:
         self.log_flush()
 
     def unset_var(self,vname):
-        if self.allow_set_var(vname, None):
-            del self.vars[vname]
+        val = self.allow_set_var(vname, None)
+        if val == None:
+            try:
+                del self.vars[vname]
+            except KeyError as ke:
+                pass
             try:
                 del self.exports[vname]
             except KeyError as ke:
@@ -442,31 +468,31 @@ class shell:
             return self.vars.get(vname,"")
 
     def set_var(self,vname,value):
-        if self.allow_set_var(vname, value):
-            self.vars[vname] = value
-            if self.flags.get("a",False):
-                self.exports[vname] = value
+        value = self.allow_set_var(vname, value)
+        self.vars[vname] = value
+        if self.flags.get("a",False):
+            self.exports[vname] = value
 
-    def allow_cd(self, dname):
-        return True
+    def allow_cd(self, cd_dir):
+        return cd_dir
 
     def allow_cmd(self, args):
-        return True
+        return args
 
     def allow_read(self, fname):
-        return True
+        return fname
 
     def allow_write(self, fname):
-        return True
+        return fname
 
     def allow_append(self, fname):
-        return True
+        return fname
 
     def allow_set_var(self,var,val):
-        return True
+        return val
 
     def allow_access_var(self,var):
-        return True
+        pass
 
     def lookup_var(self,gr):
         """
@@ -483,8 +509,7 @@ class shell:
             return [str(os.getpid())]
         elif varname == "!":
             return [str(get_lastpid())]
-        if not self.allow_access_var(varname):
-            return ""
+        self.allow_access_var(varname)
         if varname in self.vars:
             v = spaceout(re.split(r'\s+', self.get_var(varname)))
         else:
@@ -803,25 +828,22 @@ class shell:
             if redir.has(rn+1,"word"):
                 fname = redir.group(rn+1).substring()
                 if ltgt == "<":
-                    if not self.allow_read(fname):
-                        fname = "/dev/null"
-                    sin = open(fname, "r")
+                    fname = self.allow_read(fname)
+                    sin = open_file(fname, "r")
                 elif ltgt == ">":
-                    if not self.allow_write(fname):
-                        pass
-                    elif fd_from is None or fd_from == "1":
-                        sout = open(fname, "w")
+                    fname = self.allow_write(fname)
+                    if fd_from is None or fd_from == "1":
+                        sout = open_file(fname,"w")
                     elif fd_from == "2":
-                        serr = open(fname, "w")
+                        serr = open_file(fname,"w")
                     else:
                         assert False, redir.dump()
                 elif ltgt == ">>":
-                    if not self.allow_append(fname):
-                        pass
-                    elif fd_from is None or fd_from == "1":
-                        sout = open(fname, "a")
+                    fname = self.allow_append(fname)
+                    if fd_from is None or fd_from == "1":
+                        sout = open_file(fname, "a")
                     elif fd_from == "2":
-                        serr = open(fname, "a")
+                        serr = open_file(fname, "a")
                     else:
                         assert False, redir.dump()
                 else:
@@ -974,11 +996,11 @@ class shell:
                 return []
             if args[0] == "cd":
                 if len(args) == 1:
-                    if self.allow_cd(home):
-                        os.chdir(home)
+                    cd_dir = home
                 else:
-                    if self.allow_cd(args[1]):
-                        os.chdir(args[1])
+                    cd_dir = args[1]
+                cd_dir = self.allow_cd(cd_dir)
+                os.chdir(args[1])
                 self.log("chdir:",args[1])
                 self.vars["PWD"] = os.getcwd()
                 return
@@ -1032,7 +1054,7 @@ class shell:
                 return
             elif args[0] in ["source", "."]:
                 assert len(args)==2
-                with open(args[1],"r") as fd:
+                with open_file(args[1],"r") as fd:
                     self.run_text(fd.read())
                     return
             elif args[0] not in ["if","then","else","fi","for","done","case","esac"]:
@@ -1056,13 +1078,13 @@ class shell:
                 if len(args) == 0 or args[0] is None:
                     return ""
                 if os.path.exists(args[0]):
-                    try:
-                        with open(args[0],"r") as fd:
+                    with open_file(args[0],"r") as fd:
+                        try:
                             first_line = fd.readline()
-                            if first_line.startswith("#!"):
-                                args = re.split(r'\s+',first_line[2:].strip()) + args
-                    except Exception as ee:
-                        pass
+                        except UnicodeDecodeError as ude:
+                            first_line = ""
+                        if first_line.startswith("#!"):
+                            args = re.split(r'\s+',first_line[2:].strip()) + args
                 if not os.path.exists(args[0]):
                     fno = gr.linenum()
                     print(f"{self.scriptname}: line {fno}: {args[0]}: command not found",file=self.stderr)
@@ -1070,8 +1092,7 @@ class shell:
                     if self.flags.get("e",False):
                         shell_exit(1)
                     return ""
-                if not self.allow_cmd(args):
-                    return ""
+                args = self.allow_cmd(args)
                 self.log("args:",args)
                 env = {}
                 if self.flags.get("x",False):
@@ -1188,7 +1209,6 @@ class shell:
         else:
             self.txt = ''
             m.showError()
-            #m.showError(sys.stderr)
             here("done")
             self.log("SYNTAX")
             m.showError(self.log_fd)
@@ -1226,6 +1246,9 @@ def run_shell(s):
         try:
             rc = interactive(s)
             s.log("rc2:",rc)
+        except ShellAccess as sa:
+            err(sa)
+            rc = -1
         except ShellExit as se:
             rc = se.rc
             exit(rc)
@@ -1240,11 +1263,14 @@ def run_shell(s):
                 n += 1
                 s.run_text(sys.argv[n])
             elif os.path.exists(f):
-                with open(f,"r") as fd:
+                with open_file(f,"r") as fd:
                     try:
                         rc = s.run_text(fd.read())
                         s.log("rc3:",rc)
                         assert rc == "EVAL", f"rc={rc}"
+                    except ShellAccess as sa:
+                        rc = -1
+                        err(sa)
                     except ShellExit as se:
                         rc = se.rc
                         exit(rc)

@@ -1,4 +1,4 @@
-from shell import shell, run_shell
+from shell import shell, run_shell, ShellAccess
 import os
 import re
 import sys
@@ -17,25 +17,22 @@ homepath = os.path.abspath(os.environ["HOME"])
 def allow_access(fn):
     fn = os.path.abspath(fn)
     if fn == workpath or fn.startswith(workpath+"/"):
-        return True
+        return fn
     else:
-        print(colored(f"Access of file '{fn}' not allowed.","red"))
-        return False
+        raise ShellAccess(f"Access of file '{fn}' not allowed.")
 
 def allow_read(fn):
     fn = os.path.abspath(fn)
-    here("allow read:",fn)
     if fn == homepath or fn.startswith(homepath+"/"):
-        return True
+        return fn
     else:
         return allow_access(fn)
 
 def allow_set_var(var, val):
     if var in ["USER","LOGNAME","HOME","PATH","SHELL"]:
-        print(colored(f"Setting of var '{var}' is not allowed.","red"))
-        return False
+        raise ShellAccess(f"Setting of var '{var}' is not allowed.")
     else:
-        return True
+        return val
 
 allowed_cmds = dict()
 
@@ -108,10 +105,9 @@ def allow_cmd(args):
         allow = False
 
     if allow:
-        return True
+        return args
     else:
-        print(colored(f"Command '{args}' is not allowed.","red"))
-        return False
+        raise ShellAccess(f"Command '{args}' is not allowed.")
 
 if __name__ == "__main__":
 
