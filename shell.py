@@ -826,7 +826,7 @@ class shell:
         if redir.has(rn,"ltgt"):
             ltgt = redir.group(rn).substring()
             if redir.has(rn+1,"word"):
-                fname = redir.group(rn+1).substring()
+                fname = expandtilde(redir.group(rn+1).substring())
                 if ltgt == "<":
                     fname = self.allow_read(fname)
                     sin = open_file(fname, "r")
@@ -1000,8 +1000,8 @@ class shell:
                 else:
                     cd_dir = args[1]
                 cd_dir = self.allow_cd(cd_dir)
-                os.chdir(args[1])
-                self.log("chdir:",args[1])
+                os.chdir(cd_dir)
+                self.log("chdir:",cd_dir)
                 self.vars["PWD"] = os.getcwd()
                 return
 
