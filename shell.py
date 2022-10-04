@@ -36,19 +36,6 @@ class ShellAccess(Exception):
 def shell_exit(rc):
     raise ShellExit(rc)
 
-def err(e):
-    print(colored(str(e),"red"),file=sys.stderr)
-
-def open_file(fname, rwa):
-    sout = None
-    try:
-        return open(fname, rwa)
-    except OSError as e:
-        err(e)
-    if sout is None:
-        return open("/dev/null", rwa)
-    return sout
-
 import io
 home = os.environ["HOME"]
 
@@ -416,6 +403,24 @@ class shell:
         self.recursion = 0
         self.max_recursion_depth = 20
         self.log_fd = open(os.path.join(self.vars["HOME"],"pieshell-log.txt"),"a")
+
+    def err(self, e):
+        print(colored(str(e),"red"),file=self.stderr)
+
+    def open_file(self, fname, rwa, line):
+        sout = None
+        try:
+            return open(fname, rwa)
+        except PermissionError as pe:
+            print(self.scriptname,":",
+                " line ", line, ": ", fname,": ",
+                pe.strerror.strip(),
+                sep="", file=self.stderr)
+        except OSError as e:
+            self.err(e)
+        if sout is None:
+            return open("/dev/null", rwa)
+        return sout
     
     def env_is_bound(self):
         return os.environ is self.exports
@@ -826,24 +831,25 @@ class shell:
         if redir.has(rn,"ltgt"):
             ltgt = redir.group(rn).substring()
             if redir.has(rn+1,"word"):
+                line = redir.linenum()
                 fname = expandtilde(redir.group(rn+1).substring())
                 if ltgt == "<":
                     fname = self.allow_read(fname)
-                    sin = open_file(fname, "r")
+                    sin = self.open_file(fname, "r", line)
                 elif ltgt == ">":
                     fname = self.allow_write(fname)
                     if fd_from is None or fd_from == "1":
-                        sout = open_file(fname,"w")
+                        sout = self.open_file(fname,"w", line)
                     elif fd_from == "2":
-                        serr = open_file(fname,"w")
+                        serr = self.open_file(fname,"w", line)
                     else:
                         assert False, redir.dump()
                 elif ltgt == ">>":
                     fname = self.allow_append(fname)
                     if fd_from is None or fd_from == "1":
-                        sout = open_file(fname, "a")
+                        sout = self.open_file(fname, "a", line)
                     elif fd_from == "2":
-                        serr = open_file(fname, "a")
+                        serr = self.open_file(fname, "a", line)
                     else:
                         assert False, redir.dump()
                 else:
@@ -1054,7 +1060,7 @@ class shell:
                 return
             elif args[0] in ["source", "."]:
                 assert len(args)==2
-                with open_file(args[1],"r") as fd:
+                with self.open_file(args[1],"r",gr.linenum()) as fd:
                     self.run_text(fd.read())
                     return
             elif args[0] not in ["if","then","else","fi","for","done","case","esac"]:
@@ -1078,7 +1084,11 @@ class shell:
                 if len(args) == 0 or args[0] is None:
                     return ""
                 if os.path.exists(args[0]):
-                    with open_file(args[0],"r") as fd:
+                    if gr is None:
+                        gr_line = 0
+                    else:
+                        gr_line = gr.linenum()
+                    with self.open_file(args[0],"r",gr_line) as fd:
                         try:
                             first_line = fd.readline()
                         except UnicodeDecodeError as ude:
@@ -1247,7 +1257,7 @@ def run_shell(s):
             rc = interactive(s)
             s.log("rc2:",rc)
         except ShellAccess as sa:
-            err(sa)
+            self.err(sa,self.stderr)
             rc = -1
         except ShellExit as se:
             rc = se.rc
@@ -1263,14 +1273,14 @@ def run_shell(s):
                 n += 1
                 s.run_text(sys.argv[n])
             elif os.path.exists(f):
-                with open_file(f,"r") as fd:
+                with self.open_file(f,"r",1) as fd:
                     try:
                         rc = s.run_text(fd.read())
                         s.log("rc3:",rc)
                         assert rc == "EVAL", f"rc={rc}"
                     except ShellAccess as sa:
                         rc = -1
-                        err(sa)
+                        self.err(sa,self.stderr)
                     except ShellExit as se:
                         rc = se.rc
                         exit(rc)
