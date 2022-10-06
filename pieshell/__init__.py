@@ -40,7 +40,6 @@ import io
 home = os.environ["HOME"]
 
 if sys.argv[0] == "-c":
-    sys.argv = sys.argv[1:]
     my_shell = sys.modules[__name__].__file__
 else:
     my_shell = os.path.realpath(sys.argv[0])
@@ -1295,10 +1294,6 @@ def run_shell(s):
         found = False
         for n in range(1,len(args)):
             f = args[n]
-            here("reading:",n,f)
-            if f == "-c":
-                n += 1
-                s.run_text(args[n])
                 found = True
             elif os.path.exists(f):
                 with s.open_file(f,"r",1) as fd:
