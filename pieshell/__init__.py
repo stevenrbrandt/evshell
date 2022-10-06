@@ -4,18 +4,18 @@
 # (2) Supercharge Jupyter: Allow in-process calling of bash from Python, save ENVIRON variables, etc.
 # (3) Call python functions from bash or bash functions from python
 from pwd import getpwnam, getpwuid
-from Piraha import parse_peg_src, Matcher, Group, set_trace
+from piraha import parse_peg_src, Matcher, Group, set_trace
 from subprocess import Popen, PIPE, STDOUT
-from pipe_threads import PipeThread, get_lastpid, get_running
+from .pipe_threads import PipeThread, get_lastpid, get_running
 import os
 import sys
 import re
 import io
 from traceback import print_exc
-from here import here
+from .here import here
 from shutil import which
 from datetime import datetime
-from tmpfile import tmpfile
+from .tmpfile import tmpfile
 
 # The way exit works is to raise SystemExit,
 # which may be caught. When we want to exit our
@@ -120,11 +120,11 @@ w=[a-zA-Z0-9_]+
 var=\$({wchar}|{w}|\{(({w}|{wchar})({unset}{words2}|{unset_raw}{raw_word}|{rm_front}{word2}|{rm_back}{word2}|))\})
 func=function {ident} \( \) \{( {cmd})* \}({redir}|[ \t])*\n
 
-worditem=({glob}|{redir}|{ml}|{var}|{math}|{subproc}|{raw_word}|{squote}|{dquote}|{bquote})
-worditemex=({glob}|{redir}|{ml}|{var}|{math}|{subproc}|{raw_word}|{squote}|{dquote}|{bquote}|{expand})
+worditem=({glob}|{redir}|{var}|{math}|{subproc}|{raw_word}|{squote}|{dquote}|{bquote})
+worditemex=({glob}|{redir}|{var}|{math}|{subproc}|{raw_word}|{squote}|{dquote}|{bquote}|{expand})
 word={expand}{-worditemex}+|{-worditem}{-worditemex}*
 
-word2=({glob}|{redir}|{ml}|{var}|{math}|{subproc}|{raw_word}|{squote}|{dquote}|{bquote})
+word2=({glob}|{redir}|{var}|{math}|{subproc}|{raw_word}|{squote}|{dquote}|{bquote})
 words2={word2}+
 
 ending=(&&?|\|[\|&]?|;(?!;)|\n|$)
@@ -135,10 +135,9 @@ case2=;;{-s}({esac}|{casepattern}|)
 
 fd_from=[0-9]+
 fd_to=&[0-9]+
-ltgt=(<|>>|>)
+ltgt=(<<<|<<|<|>>|>)
 redir=({fd_from}|){ltgt}( {fd_to}| {word})
 ident=[a-zA-Z0-9][a-zA-Z0-9_]*
-ml=<< {ident}
 mathchar=(\)[^)]|[^)])
 math=\$\(\(({var}|{mathchar})*\)\)
 subproc=\$\(( {cmd})* \)
@@ -368,6 +367,7 @@ class shell:
     def __init__(self,stdout = None, stderr = None, stdin = None):
         self.scriptname = "bash"
         self.txt = ""
+        self.wait_for = None
         self.flags = {}
         self.vars = {"?":"0", "PWD":os.path.realpath(os.getcwd()),"*":" ".join(sys.argv[2:]), "SHELL":os.path.realpath(sys.argv[0]), "PYSHELL":"1"}
         pwdata = getpwuid(os.getuid())
@@ -837,6 +837,11 @@ class shell:
                 if ltgt == "<":
                     fname = self.allow_read(fname)
                     sin = self.open_file(fname, "r", line)
+                elif ltgt == "<<":
+                    # fname is not a file name here,
+                    # but a symbol such as EOF
+                    here()
+                    self.wait_for = fname
                 elif ltgt == ">":
                     fname = self.allow_write(fname)
                     if fd_from is None or fd_from == "1":
@@ -856,6 +861,7 @@ class shell:
                 else:
                     assert False, redir.dump()
             elif redir.has(rn+1,"fd_to"):
+                here()
                 if redir.group(rn+1).substring() == "&2":
                     assert fd_from is None or fd_from=="1"
                     if sout == -1 and serr == -1:

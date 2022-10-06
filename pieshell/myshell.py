@@ -1,4 +1,4 @@
-from shell import shell, run_shell, ShellAccess
+from pieshell import shell, run_shell, ShellAccess
 import os
 import re
 import sys

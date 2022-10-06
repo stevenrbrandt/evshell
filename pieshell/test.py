@@ -1,9 +1,9 @@
-from shell import shell, ShellExit
+from . import shell, ShellExit
 import sys, re, os
 from subprocess import Popen, PIPE
-from here import here
-from colored import colored
-from tmpfile import tmpfile
+from .here import here
+from .colored import colored
+from .tmpfile import tmpfile
 
 s = shell()
 
