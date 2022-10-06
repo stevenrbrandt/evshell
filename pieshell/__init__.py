@@ -39,7 +39,10 @@ def shell_exit(rc):
 import io
 home = os.environ["HOME"]
 
-my_shell = os.path.realpath(sys.argv[0])
+if sys.argv[0] == "-c":
+    my_shell = sys.modules[__name__].__file__
+else:
+    my_shell = os.path.realpath(sys.argv[0])
 
 Never = object()
 
@@ -1251,6 +1254,20 @@ def interactive(shell):
         except EOFError as ee:
             return shell.vars["?"]
 
+def run_interactive(s):
+    try:
+        rc = interactive(s)
+        s.log("rc2:",rc)
+    except ShellAccess as sa:
+        self.err(sa,self.stderr)
+        rc = -1
+    except ShellExit as se:
+        rc = se.rc
+        exit(rc)
+    except Exception as ee:
+        rc = 1
+        s.log_exc()
+    exit(rc)
 def run_shell(s):
     ssh_cmd = os.environ.get("SSH_ORIGINAL_COMMAND",None)
     if ssh_cmd is not None:
@@ -1259,41 +1276,38 @@ def run_shell(s):
             s.log("rc1:",rc)
         except Exception as ee:
             s.log_exc()
-    elif len(sys.argv) == 1:
-        try:
-            rc = interactive(s)
-            s.log("rc2:",rc)
-        except ShellAccess as sa:
-            self.err(sa,self.stderr)
-            rc = -1
-        except ShellExit as se:
-            rc = se.rc
-            exit(rc)
-        except Exception as ee:
-            rc = 1
-            s.log_exc()
-        exit(rc)
     else:
+        found = False
         for n in range(1,len(sys.argv)):
             f = sys.argv[n]
             if f == "-c":
                 n += 1
                 s.run_text(sys.argv[n])
+                found = True
             elif os.path.exists(f):
                 with s.open_file(f,"r",1) as fd:
                     try:
+                        found = True
                         rc = s.run_text(fd.read())
                         s.log("rc3:",rc)
                         assert rc == "EVAL", f"rc={rc}"
                     except ShellAccess as sa:
                         rc = -1
                         self.err(sa,self.stderr)
+                        exit(rc)
                     except ShellExit as se:
                         rc = se.rc
                         exit(rc)
                     except Exception as ee:
                         s.log_exc()
+        run_interactive(s)
+
+def main():
+    s = shell()
+    for i in range(1,len(sys.argv)):
+        s.set_var(str(i),sys.argv[i])
+    s.set_var("0",my_shell)
+    run_shell(s)
 
 if __name__ == "__main__":
-    s = shell()
-    run_shell(s)
+    main()
