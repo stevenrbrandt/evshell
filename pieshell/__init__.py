@@ -1291,7 +1291,7 @@ def run_shell(s):
         except Exception as ee:
             s.log_exc()
     elif s.shell_name != s.args[0]:
-        s.script_name  = s.args[0]
+        s.scriptname  = s.args[0]
         with s.open_file(s.args[0],"r",1) as fd:
             rc = s.run_text(fd.read())
             s.log("rc5",rc)

@@ -52,12 +52,10 @@ def test(cmd,fname=None):
             s.run_text(cmd)
         else:
             try:
-                #s.run_file(fname)
-                s.args = [fname]
-                s.scriptname = fname
-                for i in range(len(s.args)):
-                    s.set_var(str(i),s.args[i])
-                run_shell(s)
+                s2 = shell([fname])
+                s2.stdout = fd1
+                s2.stderr = fd2
+                run_shell(s2)
             except ShellExit as se:
                 pass
         o2, e2 = fd1.getvalue(), fd2.getvalue()
