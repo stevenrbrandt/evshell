@@ -44,8 +44,6 @@ if sys.argv[0] == "-c":
     my_shell = sys.modules[__name__].__file__
 else:
     my_shell = os.path.realpath(sys.argv[0])
-with open("/dev/tty","w") as fd:
-    print(">>",my_shell, sys.argv, file=fd)
 
 Never = object()
 
