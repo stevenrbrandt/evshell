@@ -10,7 +10,7 @@ def here(*args):
     fname = os.path.realpath(frame.filename)
     if fname.startswith(_here):
         fname = fname[len(_here)+1:]
-    print(colored("HERE:","cyan"),fname+":"+colored(frame.lineno,"yellow"), *args, flush=True)
+    print(colored("HERE:","cyan"),fname+":"+colored(str(frame.lineno),"yellow"), *args, flush=True)
     frame = None
     stack = None
 

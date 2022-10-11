@@ -1,4 +1,4 @@
-from . import shell, ShellExit
+from . import shell, ShellExit, run_shell
 import sys, re, os
 from subprocess import Popen, PIPE
 from .here import here
@@ -40,7 +40,7 @@ def test(cmd,fname=None):
         p = Popen(pcmd,universal_newlines=True,stdout=PIPE,stderr=PIPE)
         o, e = p.communicate()
 
-        # Second, piebash...
+        # Second, pieshell...
         fd1 = tmpfile()
         s.stdout = fd1
 
@@ -52,20 +52,23 @@ def test(cmd,fname=None):
             s.run_text(cmd)
         else:
             try:
-                s.run_file(fname)
+                s2 = shell([fname])
+                s2.stdout = fd1
+                s2.stderr = fd2
+                run_shell(s2)
             except ShellExit as se:
                 pass
         o2, e2 = fd1.getvalue(), fd2.getvalue()
         try:
-            print("   bash: (",colored(re.sub(r'\n',r'\\n',o),"green"),")",sep='')
-            print("piebash: (",colored(re.sub(r'\n',r'\\n',o2),"magenta"),")",sep='')
+            print("    bash: (",colored(re.sub(r'\n',r'\\n',o),"green"),")",sep='')
+            print("pieshell: (",colored(re.sub(r'\n',r'\\n',o2),"magenta"),")",sep='')
         except BrokenPipeError as bpe:
             with open("/dev/tty","w") as fd:
                 here("Broken pipe!",file=fd)
-                print("   bash: (",colored(re.sub(r'\n',r'\\n',o),"green"),")",sep='',file=fd)
-                print("piebash: (",colored(re.sub(r'\n',r'\\n',o2),"magenta"),")",sep='',file=fd)
+                print("    bash: (",colored(re.sub(r'\n',r'\\n',o),"green"),")",sep='',file=fd)
+                print("pieshell: (",colored(re.sub(r'\n',r'\\n',o2),"magenta"),")",sep='',file=fd)
         assert o == o2
-        assert e == e2, f"<{e}> != <{e2}>"
+        assert e == e2, f"bash: <{e}> != pieshell: <{e2}>"
         here("test passed")
     finally:
         s.vars = {}

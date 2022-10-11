@@ -39,7 +39,15 @@ def shell_exit(rc):
 import io
 home = os.environ["HOME"]
 
-my_shell = os.path.realpath(sys.argv[0])
+with open("/dev/tty","w") as fd:
+    print(">>", sys.argv, file=fd)
+if sys.argv[0] == "-c":
+    sys.argv = sys.argv[1:]
+    my_shell = sys.modules[__name__].__file__
+else:
+    my_shell = os.path.realpath(sys.argv[0])
+with open("/dev/tty","w") as fd:
+    print(">>",my_shell, sys.argv, file=fd)
 
 Never = object()
 
@@ -364,22 +372,28 @@ def expandtilde(s):
 
 class shell:
     
-    def __init__(self,stdout = None, stderr = None, stdin = None):
+    def __init__(self,args=sys.argv, shell_name=my_shell, stdout=None, stderr=None, stdin=None):
+        self.shell_name = shell_name
+        self.args = args
         self.scriptname = "bash"
         self.txt = ""
         self.wait_for = None
         self.flags = {}
-        self.vars = {"?":"0", "PWD":os.path.realpath(os.getcwd()),"*":" ".join(sys.argv[2:]), "SHELL":os.path.realpath(sys.argv[0]), "PYSHELL":"1"}
+        self.vars = {
+            "?":"0",
+            "PWD":os.path.realpath(os.getcwd()),
+            "*":" ".join(self.args[1:]),
+            "SHELL":os.path.realpath(shell_name),
+            "PYSHELL":"1"}
         pwdata = getpwuid(os.getuid())
         self.vars["USER"] = pwdata.pw_name
         self.vars["LOGNAME"] = pwdata.pw_name
         self.vars["HOME"] = pwdata.pw_dir
 
         # Command line args
-        args = sys.argv[2:]
         self.vars["@"] = " ".join(args)
         for vnum in range(len(args)):
-            self.vars[str(vnum+1)] = args[vnum]
+            self.vars[str(vnum)] = args[vnum]
 
         self.exports = {}
         for var in os.environ:
@@ -474,6 +488,7 @@ class shell:
             return self.vars.get(vname,"")
 
     def set_var(self,vname,value):
+        assert vname != "2"
         value = self.allow_set_var(vname, value)
         self.vars[vname] = value
         if self.flags.get("a",False):
@@ -1079,8 +1094,8 @@ class shell:
                     if args0 is not None:
                         args0 = os.path.abspath(args0)
                         args[0] = args0
-                if args[0] in ["/usr/bin/bash","/bin/bash","/usr/bin/sh","/bin/sh"]:
-                    args = [sys.executable, my_shell] + args[1:]
+                #if args[0] in ["/usr/bin/bash","/bin/bash","/usr/bin/sh","/bin/sh"]:
+                #    args = [my_shell] + args[1:]
                 # We don't have a way to tell Popen we want both
                 # streams to go to stderr, so we add this flag
                 # and swap the output and error output after the
@@ -1251,7 +1266,23 @@ def interactive(shell):
         except EOFError as ee:
             return shell.vars["?"]
 
+def run_interactive(s):
+    try:
+        rc = interactive(s)
+        s.log("rc2:",rc)
+    except ShellAccess as sa:
+        self.err(sa,self.stderr)
+        rc = -1
+    except ShellExit as se:
+        rc = se.rc
+        exit(rc)
+    except Exception as ee:
+        rc = 1
+        s.log_exc()
+    exit(rc)
+
 def run_shell(s):
+    args = s.args
     ssh_cmd = os.environ.get("SSH_ORIGINAL_COMMAND",None)
     if ssh_cmd is not None:
         try:
@@ -1259,41 +1290,49 @@ def run_shell(s):
             s.log("rc1:",rc)
         except Exception as ee:
             s.log_exc()
-    elif len(sys.argv) == 1:
-        try:
-            rc = interactive(s)
-            s.log("rc2:",rc)
-        except ShellAccess as sa:
-            self.err(sa,self.stderr)
-            rc = -1
-        except ShellExit as se:
-            rc = se.rc
-            exit(rc)
-        except Exception as ee:
-            rc = 1
-            s.log_exc()
-        exit(rc)
+    elif s.shell_name != s.args[0]:
+        s.scriptname  = s.args[0]
+        with s.open_file(s.args[0],"r",1) as fd:
+            rc = s.run_text(fd.read())
+            s.log("rc5",rc)
     else:
-        for n in range(1,len(sys.argv)):
-            f = sys.argv[n]
+        found = False
+        for n in range(1,len(args)):
+            f = args[n]
+            here("reading:",n,f)
             if f == "-c":
                 n += 1
-                s.run_text(sys.argv[n])
+                s.run_text(args[n])
+                found = True
             elif os.path.exists(f):
                 with s.open_file(f,"r",1) as fd:
                     try:
+                        found = True
                         rc = s.run_text(fd.read())
                         s.log("rc3:",rc)
                         assert rc == "EVAL", f"rc={rc}"
                     except ShellAccess as sa:
                         rc = -1
                         self.err(sa,self.stderr)
+                        exit(rc)
                     except ShellExit as se:
                         rc = se.rc
                         exit(rc)
                     except Exception as ee:
                         s.log_exc()
+        if not found:
+            run_interactive(s)
+
+def main():
+    if len(sys.argv)>1 and os.access(sys.argv[0], os.R_OK):
+        sh = my_shell
+        args = sys.argv[1:]
+    else:
+        sh = sys.argv[0]
+        args = sys.argv
+    s = shell(args=args, shell_name=sh)
+    args = sys.argv
+    run_shell(s)
 
 if __name__ == "__main__":
-    s = shell()
-    run_shell(s)
+    main()
