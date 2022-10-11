@@ -39,8 +39,6 @@ def shell_exit(rc):
 import io
 home = os.environ["HOME"]
 
-with open("/dev/tty","w") as fd:
-    print(">>", sys.argv, file=fd)
 if sys.argv[0] == "-c":
     sys.argv = sys.argv[1:]
     my_shell = sys.modules[__name__].__file__
