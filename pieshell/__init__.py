@@ -380,7 +380,7 @@ class shell:
             "PWD":os.path.realpath(os.getcwd()),
             "*":" ".join(self.args[1:]),
             "SHELL":os.path.realpath(shell_name),
-            "PYSHELL":"1"}
+            "PIESHELL":"0.0.5"}
         pwdata = getpwuid(os.getuid())
         self.vars["USER"] = pwdata.pw_name
         self.vars["LOGNAME"] = pwdata.pw_name
@@ -1168,8 +1168,6 @@ class shell:
             s0 = self.stdin
             s1 = self.stdout
             s2 = self.stderr
-            if s0 is None:
-                self.stdin = open("/dev/null")
             if s1 is None:
                 if is_jupyter:
                     self.stdout = tmpfile()
@@ -1259,6 +1257,8 @@ def interactive(shell):
             msg = shell.run_text(inp)
         except KeyboardInterrupt as ke:
             print(colored("Interrupt","red"))
+            msg = "EVAL"
+            shell.txt = ""
         except EOFError as ee:
             return shell.vars["?"]
 
