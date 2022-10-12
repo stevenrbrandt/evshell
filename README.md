@@ -11,14 +11,14 @@ python3 -m pip install --user 'git+https://github.com/stevenrbrandt/pieshell/'
 
 Demo:
 ```
-  $ python3 shell.py
-shell> echo hello
+$ pieshell
+🍰> echo hello
 hello
-shell> for i in $(seq 1 10)
->> do
->> echo $i
+🍰> for i in $(seq 1 10)
+🍰? do
+🍰? echo $i
 1
->> done
+🍰? done
 2
 3
 4
@@ -28,6 +28,6 @@ shell> for i in $(seq 1 10)
 8
 9
 10
-shell> echo $((3+4))
+🍰> echo $((3+4))
 7
 ```
