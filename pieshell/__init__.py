@@ -1,5 +1,5 @@
 #!/usr/bin/env python3 
-# Purpose of Piebash
+# Purpose of Pieshell
 # (1) Security for Science Gateways
 # (2) Supercharge Jupyter: Allow in-process calling of bash from Python, save ENVIRON variables, etc.
 # (3) Call python functions from bash or bash functions from python
@@ -118,9 +118,10 @@ unset=:-
 unset_raw=-
 rm_front=\#\#?
 rm_back=%%?
-wchar=[@?$!]
+def=:-
+wchar=[@?$!-]
 w=[a-zA-Z0-9_]+
-var=\$({wchar}|{w}|\{(({w}|{wchar})({unset}{words2}|{unset_raw}{raw_word}|{rm_front}{word2}|{rm_back}{word2}|))\})
+var=\$({wchar}|{w}|\{(({w}|{wchar})({unset}{words2}|{unset_raw}{raw_word}|{rm_front}{word2}|{rm_back}{word2}|{def}{word2}?|))\})
 func=function {ident} \( \) \{( {cmd})* \}({redir}|[ \t])*\n
 
 worditem=({glob}|{redir}|{var}|{math}|{subproc}|{raw_word}|{squote}|{dquote}|{bquote})
@@ -365,6 +366,22 @@ def expandtilde(s):
     else:
         return s
 
+def printf(*args):
+    pyargs = []
+    for arg in args[1:]:
+        try:
+            pyargs += [int(arg)]
+            continue
+        except:
+            pass
+        try:
+            pyargs += [float(arg)]
+            continue
+        except:
+            pass
+        pyargs += [arg]
+    print(args[0] % tuple(pyargs))
+
 class shell:
     
     def __init__(self,args=sys.argv, shell_name=my_shell, stdout=None, stderr=None, stdin=None):
@@ -379,7 +396,7 @@ class shell:
             "PWD":os.path.realpath(os.getcwd()),
             "*":" ".join(self.args[1:]),
             "SHELL":os.path.realpath(shell_name),
-            "PIESHELL":"0.0.5"}
+            "PIESHELL":"0.0.6"}
         pwdata = getpwuid(os.getuid())
         self.vars["USER"] = pwdata.pw_name
         self.vars["LOGNAME"] = pwdata.pw_name
@@ -404,6 +421,7 @@ class shell:
         self.for_loops = []
         self.case_stack = []
         self.funcs = {}
+        self.pyfuncs = { "printf" : printf}
         self.save_in = []
         self.save_out = []
         self.last_ending = None
@@ -1062,6 +1080,13 @@ class shell:
                     for k in save:
                         self.vars[k] = save[k]
                 return []
+            elif args[0] in self.pyfuncs:
+                # Invoke a python function
+                try:
+                    return self.pyfuncs[args[0]](*args[1:])
+                except Exception as e:
+                    print(colored(f"'{args[0]}' threw '{type(e)}: {e}'"))
+                    return []
             elif args[0] == "unset":
                 for a in args[1:]:
                     self.unset_var(a)
