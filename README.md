@@ -1,6 +1,7 @@
 # Pieshell
 
-Pieshell is an implementation of most of the bash shell features in Python. One of the main goals is to provide a fine-grained limitation of what users are allowed to do. It's also just fun.
+<span style="float: left; display: inline-block"><img width=100 src="images/pieshell-logo.png"></span>
+<span style="display: inline-block"><p>Pieshell is an implementation of most of the bash shell features in Python. One of the main goals is to provide a fine-grained limitation of what users are allowed to do. It's also just fun.</p></span>
 
 Installation:
 
