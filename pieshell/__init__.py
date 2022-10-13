@@ -1294,6 +1294,9 @@ def run_shell(s):
         found = False
         for n in range(1,len(args)):
             f = args[n]
+            if f == "-c":
+                n += 1
+                s.run_text(args[n])
                 found = True
             elif os.path.exists(f):
                 with s.open_file(f,"r",1) as fd:
