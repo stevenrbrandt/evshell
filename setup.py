@@ -1,8 +1,9 @@
 from setuptools import setup, find_packages
+from pieshell.version import __version__
 
 setup(
   name='Pieshell',
-  version='0.0.6',
+  version=__version__,
   description='An implementation of the shell in pure Python',
   long_description='An implementation of the shell in pure Python',
   url='https://github.com/stevenrbrandt/pieshell.git',

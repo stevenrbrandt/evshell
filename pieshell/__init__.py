@@ -16,6 +16,7 @@ from .here import here
 from shutil import which
 from datetime import datetime
 from .tmpfile import tmpfile
+from .version import __version__
 
 # The way exit works is to raise SystemExit,
 # which may be caught. When we want to exit our
@@ -396,7 +397,7 @@ class shell:
             "PWD":os.path.realpath(os.getcwd()),
             "*":" ".join(self.args[1:]),
             "SHELL":os.path.realpath(shell_name),
-            "PIESHELL":"0.0.6"}
+            "PIESHELL":__version__}
         pwdata = getpwuid(os.getuid())
         self.vars["USER"] = pwdata.pw_name
         self.vars["LOGNAME"] = pwdata.pw_name
