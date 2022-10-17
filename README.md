@@ -1,4 +1,4 @@
-# Sshell - The Snake Shell
+# sshell - The Snake Shell
 
 <span style="float: left; display: inline-block"><img width=100 src="images/sshell-logo.png"></span>
 <span style="display: inline-block"><p>Sshell is an implementation of most of the bash shell in Python. One of the main goals of this project is to provide a restricted shell that enables fine-grained limitation of what users are allowed to do. It's also just fun.</p></span>
