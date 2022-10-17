@@ -60,15 +60,15 @@ def test(cmd,fname=None):
                 pass
         o2, e2 = fd1.getvalue(), fd2.getvalue()
         try:
-            print("  bash: (",colored(re.sub(r'\n',r'\\n',o),"green"),")",sep='')
-            print("sshell: (",colored(re.sub(r'\n',r'\\n',o2),"magenta"),")",sep='')
+            print("   bash: (",colored(re.sub(r'\n',r'\\n',o),"green"),")",sep='')
+            print("evshell: (",colored(re.sub(r'\n',r'\\n',o2),"magenta"),")",sep='')
         except BrokenPipeError as bpe:
             with open("/dev/tty","w") as fd:
                 here("Broken pipe!",file=fd)
-                print("  bash: (",colored(re.sub(r'\n',r'\\n',o),"green"),")",sep='',file=fd)
-                print("sshell: (",colored(re.sub(r'\n',r'\\n',o2),"magenta"),")",sep='',file=fd)
+                print("   bash: (",colored(re.sub(r'\n',r'\\n',o),"green"),")",sep='',file=fd)
+                print("evshell: (",colored(re.sub(r'\n',r'\\n',o2),"magenta"),")",sep='',file=fd)
         assert o == o2
-        assert e == e2, f"bash: <{e}> != sshell: <{e2}>"
+        assert e == e2, f"bash: <{e}> != evshell: <{e2}>"
         here("test passed")
     finally:
         s.vars = {}

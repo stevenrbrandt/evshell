@@ -1,4 +1,4 @@
-from sshell import shell, run_shell, ShellAccess
+from evshell import shell, run_shell, ShellAccess
 import os
 import re
 import sys

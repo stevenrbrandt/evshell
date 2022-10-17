@@ -1,17 +1,16 @@
-# sshell - The Snake Shell
+# evshell - The Everglades Shell
 
-<span style="float: left; display: inline-block"><img width=100 src="images/sshell-logo.png"></span>
-<span style="display: inline-block"><p>Sshell is an implementation of most of the bash shell in Python. One of the main goals of this project is to provide a restricted shell that enables fine-grained limitation of what users are allowed to do. It's also just fun.</p></span>
+<span style="display: inline-block"><p>Evhell is an implementation of most of the bash shell in Python. One of the main goals of this project is to provide a restricted shell that enables fine-grained limitation of what users are allowed to do. It's also just fun.</p></span>
 
 Installation:
 
 ```
-python3 -m pip install --user sshell
+python3 -m pip install --user evshell
 ```
 
 Demo:
 ```
-$ sshell
+$ evshell
 🍰> echo hello
 hello
 🍰> for i in $(seq 1 10)
