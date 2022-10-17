@@ -1,5 +1,5 @@
 #!/usr/bin/env python3 
-# Purpose of Pieshell
+# Purpose of Snake Shell
 # (1) Security for Science Gateways
 # (2) Supercharge Jupyter: Allow in-process calling of bash from Python, save ENVIRON variables, etc.
 # (3) Call python functions from bash or bash functions from python
@@ -397,7 +397,7 @@ class shell:
             "PWD":os.path.realpath(os.getcwd()),
             "*":" ".join(self.args[1:]),
             "SHELL":os.path.realpath(shell_name),
-            "PIESHELL":__version__}
+            "SSHELL":__version__}
         pwdata = getpwuid(os.getuid())
         self.vars["USER"] = pwdata.pw_name
         self.vars["LOGNAME"] = pwdata.pw_name
@@ -430,7 +430,7 @@ class shell:
         self.last_pipe = None
         self.recursion = 0
         self.max_recursion_depth = 20
-        self.log_fd = open(os.path.join(self.vars["HOME"],"pieshell-log.txt"),"a")
+        self.log_fd = open(os.path.join(self.vars["HOME"],"sshell-log.txt"),"a")
 
     def err(self, e):
         print(colored(str(e),"red"),file=self.stderr)
