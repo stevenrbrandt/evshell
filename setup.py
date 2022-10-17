@@ -11,9 +11,9 @@ else:
     raise RuntimeError(f"Unable to find version in file '{vfile}")
 
 setup(
-  name='Everglades Shell',
+  name='evshell',
   version=__version__,
-  description='An implementation of the shell in pure Python',
+  description='evshell: The Everglades Shell, an implementation of the shell in pure Python',
   long_description='An implementation of the shell in pure Python',
   url='https://github.com/stevenrbrandt/evshell.git',
   author='Steven R. Brandt',
