@@ -1,5 +1,5 @@
 from setuptools import setup, find_packages
-from pieshell.version import __version__
+from sshell.version import __version__
 
 setup(
   name='Snake Shell',
