@@ -397,6 +397,7 @@ class shell:
             "PWD":os.path.realpath(os.getcwd()),
             "*":" ".join(self.args[1:]),
             "SHELL":os.path.realpath(shell_name),
+            "PYTHON":sys.executable,
             "EVSHELL":__version__}
         pwdata = getpwuid(os.getuid())
         self.vars["USER"] = pwdata.pw_name
@@ -1292,7 +1293,7 @@ def run_interactive(s):
         rc = interactive(s)
         s.log("rc2:",rc)
     except ShellAccess as sa:
-        self.err(sa,self.stderr)
+        s.err(sa) #,s.stderr)
         rc = -1
     except ShellExit as se:
         rc = se.rc
@@ -1311,7 +1312,7 @@ def run_shell(s):
             s.log("rc1:",rc)
         except Exception as ee:
             s.log_exc()
-    elif s.shell_name != s.args[0]:
+    elif os.path.realpath(s.shell_name) != os.path.realpath(s.args[0]):
         s.scriptname  = s.args[0]
         with s.open_file(s.args[0],"r",1) as fd:
             rc = s.run_text(fd.read())

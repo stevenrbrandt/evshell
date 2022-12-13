@@ -111,6 +111,9 @@ def allow_cmd(args):
 
 if __name__ == "__main__":
 
+    # Get the full shell path
+    shell_path = os.path.realpath(sys.argv[0])
+
     # Ensure the workpath exists
     os.makedirs(workpath,exist_ok=True)
 
@@ -119,6 +122,7 @@ if __name__ == "__main__":
 
     # Create the shell
     s = shell()
+    s.args[0] = shell_path
 
     # Limit chdir
     s.allow_cd = allow_access
