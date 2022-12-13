@@ -938,7 +938,7 @@ class shell:
                             varname = g.group(1)
                             value = g.group(2)
                             self.set_var(varname,value)
-                            self.exports[varname] = value
+                            self.exports[varname] = self.vars[varname]
                         elif a in self.vars:
                             self.exports[a] = self.vars[a]
                     return
