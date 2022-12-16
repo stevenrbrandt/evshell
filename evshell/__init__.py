@@ -17,6 +17,8 @@ from shutil import which
 from datetime import datetime
 from .tmpfile import tmpfile
 from .version import __version__
+from time import time
+import json
 
 # The way exit works is to raise SystemExit,
 # which may be caught. When we want to exit our
@@ -386,6 +388,7 @@ def printf(*args):
 class shell:
     
     def __init__(self,args=sys.argv, shell_name=my_shell, stdout=None, stderr=None, stdin=None):
+        self.seq = 1
         self.shell_name = shell_name
         self.args = args
         self.scriptname = "bash"
@@ -431,7 +434,10 @@ class shell:
         self.last_pipe = None
         self.recursion = 0
         self.max_recursion_depth = 20
-        self.log_fd = open(os.path.join(self.vars["HOME"],"evshell-log.txt"),"a")
+        log_file_dir = os.path.join(self.vars["HOME"],".evshell-logs")
+        os.makedirs(log_file_dir, exist_ok = True)
+        log_file = os.path.join(log_file_dir, f"log-{os.getpid()}.jtxt")
+        self.log_fd = open(log_file,"w")
 
     def err(self, e):
         print(colored(str(e),"red"),file=self.stderr)
@@ -471,30 +477,33 @@ class shell:
     def log_flush(self):
         self.log_fd.flush()
 
-    def log_exc(self):
+    def log_exc(self,e):
         print_exc()
-        print("=" * 10,datetime.now(),"=" * 10,file=self.log_fd)
         self.log_flush()
-        print_exc(file=self.log_fd)
+        self.log(exc=e)
         self.log_flush()
 
-    def log(self,*args,**kwargs):
-        print("=" * 10,datetime.now(),"=" * 10,file=self.log_fd)
+    def log(self,**kwargs):
         self.log_flush()
-        print(*args,**kwargs,file=self.log_fd)
+        kwargs["time"] = time()
+        print(json.dumps(kwargs),file=self.log_fd)
         self.log_flush()
 
     def unset_var(self,vname):
         val = self.allow_set_var(vname, None)
         if val == None:
+            unset = False
             try:
                 del self.vars[vname]
+                unset = True
             except KeyError as ke:
                 pass
             try:
                 del self.exports[vname]
+                unset = True
             except KeyError as ke:
                 pass
+            self.log(unset=vname)
 
     def get_var(self,vname):
         if vname in self.exports:
@@ -503,6 +512,7 @@ class shell:
             return self.vars.get(vname,"")
 
     def set_var(self,vname,value):
+        self.log(setvar=vname,value=value)
         assert vname != "2"
         value = self.allow_set_var(vname, value)
         self.vars[vname] = value
@@ -843,7 +853,7 @@ class shell:
                 self.stdout.write(out)
             rc=os.waitpid(pid,0)
             self.vars["?"] = str(rc[1])
-            self.log("end subshell:",self.vars["?"])
+            self.log(msg="end subshell",rc=self.vars["?"])
             if self.vars["?"] != "0" and self.flags.get("e",False):
                 shell_exit(int(self.vars["?"]))
             return []
@@ -1035,7 +1045,7 @@ class shell:
                     p = get_running(None)
                     if p is not None:
                         result = p.communicate()
-                self.log("end wait:",self.vars["?"])
+                self.log(msg="end wait",rc=self.vars["?"])
                 return []
             if args[0] == "cd":
                 if len(args) == 1:
@@ -1044,7 +1054,7 @@ class shell:
                     cd_dir = args[1]
                 cd_dir = self.allow_cd(cd_dir)
                 os.chdir(cd_dir)
-                self.log("chdir:",cd_dir)
+                self.log(chdir=cd_dir)
                 self.vars["PWD"] = os.getcwd()
                 return
 
@@ -1147,13 +1157,15 @@ class shell:
                         shell_exit(1)
                     return ""
                 args = self.allow_cmd(args)
-                self.log("args:",args)
                 env = {}
                 if self.flags.get("x",False):
                     self.stderr.write("+ "+" ".join(args)+"\n")
                 for e in self.exports:
                     env[e] = self.exports[e]
                 try:
+                    pseq = self.seq
+                    self.seq += 1
+                    self.log(msg="start",seq=pseq, args=args)
                     p = PipeThread(args, stdin=sin, stdout=sout, stderr=serr, universal_newlines=True, env=env)
                 except OSError as e:
                     args = ["/bin/sh"]+args
@@ -1169,7 +1181,7 @@ class shell:
                     p.start()
                     p.communicate()
                     self.vars["?"] = str(p.returncode)
-                    self.log("end cmd:",self.vars["?"])
+                    self.log(msg="end",seq=pseq,rc=self.vars["?"],pid=p.getpid())
                     if self.vars["?"] != "0" and self.flags.get("e",False):
                         shell_exit(int(self.vars["?"]))
                     return None
@@ -1216,7 +1228,7 @@ class shell:
 
     def run_text_(self,txt):
         #here(colored("="*50,"yellow"))
-        self.log("txt:",txt)
+        self.log(txt=txt)
         txt = self.txt + txt
         if txt.endswith("\\\n"):
             self.txt = txt
@@ -1256,14 +1268,14 @@ class shell:
             #print()
             #m.showError()
             #print("continue...")
-            self.log("CONTINUE")
+            self.log(msg="CONTINUE")
             return "CONTNUE"
         else:
             self.txt = ''
             m.showError()
             here("done")
-            self.log("SYNTAX")
-            m.showError(self.log_fd)
+            self.log(msg="SYNTAX")
+            #m.showError(self.log_fd)
             return "SYNTAX"
 
 def interactive(shell):
@@ -1291,7 +1303,7 @@ def interactive(shell):
 def run_interactive(s):
     try:
         rc = interactive(s)
-        s.log("rc2:",rc)
+        s.log(rc=rc)
     except ShellAccess as sa:
         s.err(sa) #,s.stderr)
         rc = -1
@@ -1300,7 +1312,7 @@ def run_interactive(s):
         exit(rc)
     except Exception as ee:
         rc = 1
-        s.log_exc()
+        s.log_exc(ee)
     exit(rc)
 
 def run_shell(s):
@@ -1309,14 +1321,14 @@ def run_shell(s):
     if ssh_cmd is not None:
         try:
             rc = s.run_text(ssh_cmd)
-            s.log("rc1:",rc)
+            s.log(rc=rc)
         except Exception as ee:
-            s.log_exc()
+            s.log_exc(ee)
     elif os.path.realpath(s.shell_name) != os.path.realpath(s.args[0]):
         s.scriptname  = s.args[0]
         with s.open_file(s.args[0],"r",1) as fd:
             rc = s.run_text(fd.read())
-            s.log("rc5",rc)
+            s.log(rc=rc)
     else:
         found = False
         for n in range(1,len(args)):
@@ -1330,7 +1342,7 @@ def run_shell(s):
                     try:
                         found = True
                         rc = s.run_text(fd.read())
-                        s.log("rc3:",rc)
+                        s.log(rc=rc)
                         assert rc == "EVAL", f"rc={rc}"
                     except ShellAccess as sa:
                         rc = -1
@@ -1340,7 +1352,7 @@ def run_shell(s):
                         rc = se.rc
                         exit(rc)
                     except Exception as ee:
-                        s.log_exc()
+                        s.log_exc(ee)
         if not found:
             run_interactive(s)
 
