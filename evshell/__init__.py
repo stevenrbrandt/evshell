@@ -20,6 +20,27 @@ from .version import __version__
 from time import time
 import json
 
+def prepJson(arg):
+    if arg is None:
+        return []
+    t = type(arg)
+    if t == dict:
+        narg = {}
+        for k in arg:
+            narg[k] = prepJson(arg[k])
+    elif t == list:
+        narg = []
+        for k in range(len(arg)):
+            narg += [prepJson(arg[k])]
+    elif t == set:
+        narg = prepJson(list(arg))
+    elif t in [int,float,bool]:
+        narg = arg
+    else:
+        narg = str(arg)
+    return narg
+
+
 # The way exit works is to raise SystemExit,
 # which may be caught. When we want to exit our
 # simulated shell, we should raise ShellExit
@@ -112,19 +133,21 @@ grammar = r"""
 skipper=\b([ \t]|\\\n|\#.*)*
 s=\b([ \t\n]|\\\n|\#.*)*
 raw_word=(\\.|[^\\"'\t \n\$\#&\|;{}`()<>?*,])+
+raw_word2=(\\.|[^()[\]{}]|\[{raw_word2}\]|\({raw_word2}\)|\{{raw_word2}\})*
 dchar=[^"$\\]
 dlit=\\.
 dquote="({dlit}|{dchar}|{var}|{math}|{subproc}|{bquote})*"
 bquote=`(\\.|[^`$]|{var}|{math}|{subproc})*`
 squote='(\\.|[^'])*'
 unset=:-
+unsetp=:\+
 unset_raw=-
 rm_front=\#\#?
 rm_back=%%?
 def=:-
 wchar=[@?$!-]
 w=[a-zA-Z0-9_]+
-var=\$({wchar}|{w}|\{(({w}|{wchar})({unset}{words2}|{unset_raw}{raw_word}|{rm_front}{word2}|{rm_back}{word2}|{def}{word2}?|))\})
+var=\$({wchar}|{w}|\{(({w}|{wchar})({unset}{words2}|{unsetp}{raw_word2}|{unset_raw}{raw_word}|{rm_front}{word2}|{rm_back}{word2}|{def}{word2}?|))\})
 func=function {ident} \( \) \{( {cmd})* \}({redir}|[ \t])*\n
 
 worditem=({glob}|{redir}|{var}|{math}|{subproc}|{raw_word}|{squote}|{dquote}|{bquote})
@@ -141,7 +164,7 @@ case=case {word} in({-s}{casepattern}|)
 case2=;;{-s}({esac}|{casepattern}|)
 
 fd_from=[0-9]+
-fd_to=&[0-9]+
+fd_to=&[0-9]*
 ltgt=(<<<|<<|<|>>|>)
 redir=({fd_from}|){ltgt}( {fd_to}| {word})
 ident=[a-zA-Z0-9][a-zA-Z0-9_]*
@@ -445,17 +468,21 @@ class shell:
     def open_file(self, fname, rwa, line):
         sout = None
         try:
-            return open(fname, rwa)
+            sout = open(fname, rwa)
+            self.log(open=fname,rwa=rwa)
         except PermissionError as pe:
+            self.log(exc=pe,open=fname,rwa=rwa)
             print(self.scriptname,":",
                 " line ", line, ": ", fname,": ",
                 pe.strerror.strip(),
                 sep="", file=self.stderr)
         except OSError as e:
+            self.log(exc=pe,open=fname,rwa=rwa)
             self.err(e)
         if sout is None:
             return open("/dev/null", rwa)
-        self.stdrr.flush()
+        if self.stderr is not None:
+            self.stderr.flush()
         return sout
     
     def env_is_bound(self):
@@ -485,8 +512,10 @@ class shell:
 
     def log(self,**kwargs):
         self.log_flush()
-        kwargs["time"] = time()
-        print(json.dumps(kwargs),file=self.log_fd)
+        args = prepJson(kwargs)
+        args["time"] = time()
+        args["script"] = self.scriptname
+        print(json.dumps(args),file=self.log_fd)
         self.log_flush()
 
     def unset_var(self,vname):
@@ -1150,7 +1179,10 @@ class shell:
                         if first_line.startswith("#!"):
                             args = re.split(r'\s+',first_line[2:].strip()) + args
                 if not os.path.exists(args[0]):
-                    fno = gr.linenum()
+                    if gr is None:
+                        fno = 0
+                    else:
+                        fno = gr.linenum()
                     print(f"{self.scriptname}: line {fno}: {args[0]}: command not found",file=self.stderr)
                     self.vars["?"] = 1
                     if self.flags.get("e",False):
@@ -1228,7 +1260,11 @@ class shell:
 
     def run_text_(self,txt):
         #here(colored("="*50,"yellow"))
-        self.log(txt=txt)
+        nchars=50
+        if len(txt) < nchars:
+            self.log(txt=txt,full=True)
+        else:
+            self.log(txt=txt[0:nchars]+"...",full=False)
         txt = self.txt + txt
         if txt.endswith("\\\n"):
             self.txt = txt
@@ -1346,7 +1382,7 @@ def run_shell(s):
                         assert rc == "EVAL", f"rc={rc}"
                     except ShellAccess as sa:
                         rc = -1
-                        self.err(sa,self.stderr)
+                        s.err(sa)
                         exit(rc)
                     except ShellExit as se:
                         rc = se.rc
