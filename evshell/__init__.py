@@ -6,7 +6,7 @@
 from pwd import getpwnam, getpwuid
 from piraha import parse_peg_src, Matcher, Group, set_trace
 from subprocess import Popen, PIPE, STDOUT
-from .pipe_threads import PipeThread, get_lastpid, get_running
+from .pipe_threads import PipeThread, get_lastpid, get_running, pwait
 import os
 import sys
 import re
@@ -411,7 +411,6 @@ def printf(*args):
 class shell:
     
     def __init__(self,args=sys.argv, shell_name=my_shell, stdout=None, stderr=None, stdin=None):
-        self.seq = 1
         self.shell_name = shell_name
         self.args = args
         self.scriptname = "bash"
@@ -461,6 +460,7 @@ class shell:
         os.makedirs(log_file_dir, exist_ok = True)
         log_file = os.path.join(log_file_dir, f"log-{os.getpid()}.jtxt")
         self.log_fd = open(log_file,"w")
+        self.log(msg="starting shell")
 
     def err(self, e):
         print(colored(str(e),"red"),file=self.stderr)
@@ -513,7 +513,8 @@ class shell:
     def log(self,**kwargs):
         self.log_flush()
         args = prepJson(kwargs)
-        args["time"] = time()
+        if "time" not in args:
+            args["time"] = time()
         args["script"] = self.scriptname
         print(json.dumps(args),file=self.log_fd)
         self.log_flush()
@@ -1066,15 +1067,9 @@ class shell:
                 return []
             if args[0] == "wait":
                 result = None
-                try:
-                    pid, status = os.wait()
-                    p = get_running(pid)
-                    result = p.communicate()
-                except Exception as ee:
-                    p = get_running(None)
-                    if p is not None:
-                        result = p.communicate()
-                self.log(msg="end wait",rc=self.vars["?"])
+                p = pwait(None)
+                print("pid:",p.getpid(),"cmd:",p.args[0])
+                self.log(msg="end wait",pid=p.getpid(),rc=p.returncode)
                 return []
             if args[0] == "cd":
                 if len(args) == 1:
@@ -1184,6 +1179,7 @@ class shell:
                     else:
                         fno = gr.linenum()
                     print(f"{self.scriptname}: line {fno}: {args[0]}: command not found",file=self.stderr)
+                    self.log(args=args,msg="command not found",line=fno)
                     self.vars["?"] = 1
                     if self.flags.get("e",False):
                         shell_exit(1)
@@ -1195,13 +1191,13 @@ class shell:
                 for e in self.exports:
                     env[e] = self.exports[e]
                 try:
-                    pseq = self.seq
-                    self.seq += 1
-                    self.log(msg="start",seq=pseq, args=args)
+                    tstart = time()
                     p = PipeThread(args, stdin=sin, stdout=sout, stderr=serr, universal_newlines=True, env=env)
+                    self.log(msg="start",pid=p.getpid(), args=args, time=tstart)
                 except OSError as e:
                     args = ["/bin/sh"]+args
                     p = PipeThread(args, stdin=sin, stdout=sout, stderr=serr, universal_newlines=True, env=env)
+                    self.log(msg="start",pid=p.getpid(), args=args)
                 if self.curr_ending == "&":
                     p.background()
                     p.start()
@@ -1213,7 +1209,7 @@ class shell:
                     p.start()
                     p.communicate()
                     self.vars["?"] = str(p.returncode)
-                    self.log(msg="end",seq=pseq,rc=self.vars["?"],pid=p.getpid())
+                    self.log(msg="end", rc=self.vars["?"], pid=p.getpid())
                     if self.vars["?"] != "0" and self.flags.get("e",False):
                         shell_exit(int(self.vars["?"]))
                     return None
@@ -1339,15 +1335,18 @@ def interactive(shell):
 def run_interactive(s):
     try:
         rc = interactive(s)
-        s.log(rc=rc)
+        s.log(msg="session ended normally",rc=rc)
     except ShellAccess as sa:
         s.err(sa) #,s.stderr)
         rc = -1
+        s.log(msg="session ended with access error",rc=rc)
     except ShellExit as se:
         rc = se.rc
+        s.log(msg="session ended normally",rc=rc)
         exit(rc)
     except Exception as ee:
         rc = 1
+        s.log(msg="session ended with exception",rc=rc,exc=ee)
         s.log_exc(ee)
     exit(rc)
 

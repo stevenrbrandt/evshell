@@ -1,24 +1,49 @@
-from threading import Thread
+from threading import Thread, RLock
 from subprocess import Popen, PIPE, STDOUT
+from traceback import print_exc
 import os
 from here import here
+from time import sleep
 
 lastpid = None
 
 def get_lastpid():
     return lastpid
 
+runningLock = RLock()
 running = {}
 
-def get_running(pid):
-    if pid is None:
-        for k in running:
-            pid = k
-            print("pid:",pid)
-            break
+def get_running(pid, verbose=False):
+    with runningLock:
         if pid is None:
-            return
-    return running.get(pid,None)
+            for k in running:
+                pid = k
+                if verbose:
+                    print("pid:",pid)
+                break
+            if pid is None:
+                return
+        return running.get(pid,None)
+
+def pwait(pid):
+    if pid is not None:
+        with runningLock:
+            p = running.get(pid,None)
+            if p is None:
+                return None
+            p.communicate()
+            del running[pid]
+            return p
+    else:
+        while True:
+            with runningLock:
+                for k in running:
+                    p = running[k]
+                    if not p.is_running():
+                        del running[k]
+                        return p
+            sleep(.1)
+    return None
 
 class PipeThread(Thread):
     def __init__(self, *args, **kwargs):
@@ -31,6 +56,7 @@ class PipeThread(Thread):
         self.returncode = None
         self.p = Popen(*self.args,**self.kwargs)
         self.pid = self.p.pid
+        self.done = False
 
     def background(self):
         """
@@ -39,7 +65,8 @@ class PipeThread(Thread):
         """
         global lastpid
         lastpid = self.p.pid
-        running[self.p.pid] = self
+        with runningLock:
+            running[self.p.pid] = self
 
     def run(self):
         self.result = self.p.communicate()
@@ -48,12 +75,17 @@ class PipeThread(Thread):
             fd = self.kwargs["stdout"]
             if fd > 2:
                 os.close(self.kwargs["stdout"])
+    def is_running(self):
+        return self.p.poll() is None
+
     def getpid(self):
         return self.pid
+
     def communicate(self):
+        if self.done:
+            return self.result
         self.join()
-        if self.pid in running:
-            del running[self.pid]
+        self.done = True
         return self.result
 
 if __name__ == "__main__":
@@ -64,5 +96,6 @@ if __name__ == "__main__":
     p1.start()
     p2 = PipeThread(["sed","s/h/H/"], universal_newlines=True, stdin=pipe[0], stdout=PIPE, env=env)
     p2.start();
+    o, e = p2.communicate()
     o, e = p2.communicate()
     print("out:",o,end='')
