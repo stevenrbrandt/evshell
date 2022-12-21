@@ -45,9 +45,35 @@ def pwait(pid):
             sleep(.1)
     return None
 
-class PipeThread(Thread):
-    def __init__(self, *args, **kwargs):
+class PipeRunner(Thread):
+    def __init__(self):
         Thread.__init__(self)
+        self.setDaemon(True)
+
+    def run(self):
+        count = 0
+        while True:
+            with runningLock:
+                vals = running.values()
+            for p in vals:
+                if p.returncode is None and not p.is_running():
+                    p.run()
+                    count = 0
+                else:
+                    count += 1
+            if   count > 10000:
+                sleep(1)
+            elif count > 1000:
+                sleep(.1)
+            elif count > 100:
+                sleep(.01)
+
+_pipe_runner = PipeRunner()
+_pipe_runner.start()
+
+class PipeThread: #(Thread):
+    def __init__(self, *args, **kwargs):
+        #Thread.__init__(self)
         self.args = args
         self.kwargs = kwargs
         self.p = None
@@ -56,7 +82,7 @@ class PipeThread(Thread):
         self.returncode = None
         self.p = Popen(*self.args,**self.kwargs)
         self.pid = self.p.pid
-        self.done = False
+        self.run_in_background = False
 
     def background(self):
         """
@@ -65,8 +91,12 @@ class PipeThread(Thread):
         """
         global lastpid
         lastpid = self.p.pid
+        self.run_in_background = True
         with runningLock:
-            running[self.p.pid] = self
+            running[self.pid] = self
+
+    def start(self):
+        pass
 
     def run(self):
         self.result = self.p.communicate()
@@ -75,6 +105,7 @@ class PipeThread(Thread):
             fd = self.kwargs["stdout"]
             if fd > 2:
                 os.close(self.kwargs["stdout"])
+
     def is_running(self):
         return self.p.poll() is None
 
@@ -82,17 +113,18 @@ class PipeThread(Thread):
         return self.pid
 
     def communicate(self):
-        if self.done:
-            return self.result
-        self.join()
-        self.done = True
+        if self.run_in_background:
+            while self.returncode is None:
+                sleep(.01)
+        else:
+            self.run()
         return self.result
 
 if __name__ == "__main__":
     pipe = os.pipe()
     env = os.environ
     p1 = PipeThread(["echo","hello"], universal_newlines=True, stdout=pipe[1], env=env)
-    p1.setDaemon(True)
+    #p1.setDaemon(True)
     p1.start()
     p2 = PipeThread(["sed","s/h/H/"], universal_newlines=True, stdin=pipe[0], stdout=PIPE, env=env)
     p2.start();

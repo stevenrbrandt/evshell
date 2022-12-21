@@ -455,7 +455,7 @@ class shell:
         self.curr_ending = None
         self.last_pipe = None
         self.recursion = 0
-        self.max_recursion_depth = 20
+        self.max_recursion_depth = 2000
         log_file_dir = os.path.join(self.vars["HOME"],".evshell-logs")
         os.makedirs(log_file_dir, exist_ok = True)
         log_file = os.path.join(log_file_dir, f"log-{os.getpid()}.jtxt")
