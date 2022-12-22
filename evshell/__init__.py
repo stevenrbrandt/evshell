@@ -462,6 +462,30 @@ class shell:
         self.log_fd = open(log_file,"w")
         self.log(msg="starting shell")
 
+    def serialize(self, fd):
+        print(json.dumps(self.vars),file=fd)
+        print(json.dumps(self.exports),file=fd)
+        print(json.dumps({
+            "max_recursion_depth":self.max_recursion_depth,
+            "cwd":os.getcwd(),
+        }),file=fd)
+        import inspect
+        funcs = {}
+        for func in self.pyfuncs:
+            funcs[func] = inspect.getsource(self.pyfuncs[func])
+        print(json.dumps(funcs),file=fd)
+
+    def deserialize(self, fd):
+        self.vars = json.loads(fd.readline())
+        self.exports = json.loads(fd.readline())
+        data = json.loads(fd.readline())
+        self.max_recursion_depth = data["max_recursion_depth"]
+        os.chdir(data["cwd"])
+        funcs = json.loads(fd.readline())
+        for func in funcs:
+            eval(func)
+            self.pyfuncs[func] = globals()[func]
+
     def err(self, e):
         print(colored(str(e),"red"),file=self.stderr)
 
@@ -1173,6 +1197,29 @@ class shell:
                             first_line = ""
                         if first_line.startswith("#!"):
                             args = re.split(r'\s+',first_line[2:].strip()) + args
+                if args[0] == 'storeenv':
+                    if len(args) != 2:
+                        print(f"Usage: storeenv 'name'")
+                    else:
+                        envfile = os.path.join(home, args[1])
+                        with open(envfile, "w") as fd:
+                            self.serialize(fd)
+                            print(f"Env stored to {envfile}")
+                    return []
+                elif args[0] == 'loadenv':
+                    if len(args) != 2:
+                        print(f"Usage: loadenv 'name'")
+                    else:
+                        envfile = os.path.join(home, args[1])
+                        with open(envfile, "r") as fd:
+                            self.deserialize(fd)
+                            print(f"Env loaded from {envfile}")
+                    return []
+                elif args[0] == 'exec':
+                    exec_cmd = which(args[1])
+                    args = self.allow_cmd(args[1:])
+                    if exec_cmd is not None:
+                        os.execve(exec_cmd,args,self.exports)
                 if not os.path.exists(args[0]):
                     if gr is None:
                         fno = 0
