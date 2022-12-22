@@ -41,6 +41,25 @@ def prepJson(arg):
     return narg
 
 
+def _serGroup(g):
+    children = [_serGroup(child) for child in g.children]
+    return {"start":g.start, "end":g.end, "name":g.name, "children":children}
+
+def serGroup(g):
+    """
+    Serialize a Piraha group data structure (parse tree).
+    """
+    return {"text":g.text, "root":_serGroup(g)}
+
+def _deserGroup(data, text):
+    g = Group(data["name"], text, data["start"], data["end"])
+    g.children = [_deserGroup(c,text) for c in data["children"]]
+    return g
+
+def deserGroup(data):
+    return _deserGroup(data["root"],data["text"])
+
+
 # The way exit works is to raise SystemExit,
 # which may be caught. When we want to exit our
 # simulated shell, we should raise ShellExit
@@ -469,6 +488,13 @@ class shell:
             "max_recursion_depth":self.max_recursion_depth,
             "cwd":os.getcwd(),
         }),file=fd)
+
+        # Serialize shell functions
+        funcser = {}
+        for fname in self.funcs:
+            funcser[fname] = json.dumps([serGroup(x) for x in self.funcs[fname]])
+        print(json.dumps(funcser),file=fd)
+
         import inspect
         funcs = {}
         for func in self.pyfuncs:
@@ -481,6 +507,13 @@ class shell:
         data = json.loads(fd.readline())
         self.max_recursion_depth = data["max_recursion_depth"]
         os.chdir(data["cwd"])
+
+        # Deserialize shell functions
+        funcser = json.loads(fd.readline())
+        self.funcs = {}
+        for fname in funcser:
+            self.funcs[fname] = [deserGroup(x) for x in json.loads(funcser[fname])]
+
         funcs = json.loads(fd.readline())
         for func in funcs:
             eval(func)
