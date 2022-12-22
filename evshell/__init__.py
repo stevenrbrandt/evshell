@@ -1145,7 +1145,7 @@ class shell:
                 try:
                     return self.pyfuncs[args[0]](*args[1:])
                 except Exception as e:
-                    print(colored(f"'{args[0]}' threw '{type(e)}: {e}'"))
+                    print(colored(f"'{args[0]}' threw '{type(e)}: {e}'","red"))
                     return []
             elif args[0] == "unset":
                 for a in args[1:]:
@@ -1214,6 +1214,13 @@ class shell:
                         with open(envfile, "r") as fd:
                             self.deserialize(fd)
                             print(f"Env loaded from {envfile}")
+                    return []
+                elif len(args) == 4 and args[0] == 'pyfrom' and args[2] == 'import':
+                    args = self.allow_cmd(args)
+                    modname = args[1]
+                    funcname = args[3]
+                    module = __import__(modname)
+                    self.pyfuncs[funcname] = getattr(module,funcname)
                     return []
                 elif args[0] == 'exec':
                     exec_cmd = which(args[1])
