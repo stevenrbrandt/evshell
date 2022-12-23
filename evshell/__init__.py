@@ -17,6 +17,7 @@ from shutil import which
 from datetime import datetime
 from .tmpfile import tmpfile
 from .version import __version__
+from .completer import Completer
 from time import time
 import json
 
@@ -1400,6 +1401,9 @@ class shell:
 def interactive(shell):
     try:
         import readline
+        c = Completer()
+        readline.set_completer(c.complete)
+        readline.parse_and_bind("tab: complete")
     except Exception as ee:
         print(colored("Import of readline failed","red"))
     msg = "EVAL"
