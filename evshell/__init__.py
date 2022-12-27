@@ -20,6 +20,7 @@ from .version import __version__
 from .completer import Completer
 from time import time
 import json
+import pwd
 
 def prepJson(arg):
     if arg is None:
@@ -81,7 +82,7 @@ def shell_exit(rc):
     raise ShellExit(rc)
 
 import io
-home = os.environ["HOME"]
+home = pwd.getpwuid(os.getuid()).pw_dir
 
 if sys.argv[0] == "-c":
     my_shell = sys.modules[__name__].__file__
@@ -147,7 +148,7 @@ def unesc(s):
 
 verbose = False
 
-from colored import colored, is_jupyter
+from .colored import colored, is_jupyter
 
 grammar = r"""
 skipper=\b([ \t]|\\\n|\#.*)*

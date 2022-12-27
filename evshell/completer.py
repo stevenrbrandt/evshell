@@ -2,6 +2,9 @@ from threading import Thread
 import readline
 import os, re, sys
 from time import time
+import pwd
+
+home = pwd.getpwuid(os.getuid()).pw_dir
 
 #fd = open("log.txt","w")
 
@@ -13,6 +16,8 @@ class ExecDir:
         self.st = None
 
     def scan(self):
+        if not os.path.isdir(self.dirname):
+            return
         st = os.stat(self.dirname)
         if self.st is not None and \
            self.st.st_mtime == st.st_mtime and \
@@ -21,19 +26,10 @@ class ExecDir:
              return
         self.st = st
         for f in os.listdir(self.dirname):
-            fn = os.path.join(self.dirname,f)
-            if os.path.isfile(fn) and os.access(fn, os.X_OK):
-                self.files.append(f)
-
-class ExecThread(Thread):
-    def __init__(self,e):
-        Thread.__init__(self)
-        self.e = e
-    def run(self):
-        try:
-            self.e.scan()
-        except Exception as e:
-            pass
+            # While the next two lines are more correct, they are horrendously slow
+            #fn = os.path.join(self.dirname,f)
+            #if os.path.isfile(fn) and os.access(fn, os.X_OK):
+            self.files.append(f)
 
 class Completer:
     def __init__(self):
@@ -42,10 +38,7 @@ class Completer:
         self.path = None
         self.cmds = []
         self.paths = {}
-        t1 = time()
         self.update_cmds()
-        t2 = time()
-        print("Update cmd list:",t2-t1,"seconds")
 
     def update_cmds(self):
         cwd = os.getcwd()
@@ -54,23 +47,14 @@ class Completer:
         self.cmds = []
         threads = []
         for p in os.environ.get("PATH","").split(":"):
-            try:
-                if p == "":
-                    p = "."
-                e = self.paths.get(p,None)
-                if e is None:
-                    e = ExecDir(p)
-                    self.paths[p] = e
-                t = ExecThread(e)
-                t.start()
-                threads += [t]
-            except Exception as e:
-                #print(f"exc='{e}'",file=fd)
-                #fd.flush()
-                pass
-        for t in threads:
-            t.join()
-            self.cmds += t.e.files
+            if p == "":
+                p = "."
+            e = self.paths.get(p,None)
+            if e is None:
+                e = ExecDir(p)
+                e.scan()
+                self.paths[p] = e
+            self.cmds += e.files
 
     def build_matches(self, current_word):
 
@@ -107,6 +91,10 @@ class Completer:
         try:
             if dirname == ".":
                 matches = os.listdir(".")
+            elif dirname.startswith("~/"):
+                # This is a temporary hack.
+                fix_dirname = os.path.join(home, dirname[3:])
+                matches = [os.path.join(dirname,m) for m in os.listdir(fix_dirname)]
             else:
                 matches = [os.path.join(dirname,m) for m in os.listdir(dirname)]
         except Exception as e:

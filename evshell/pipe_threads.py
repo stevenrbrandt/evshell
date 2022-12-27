@@ -2,7 +2,7 @@ from threading import Thread, RLock
 from subprocess import Popen, PIPE, STDOUT
 from traceback import print_exc
 import os
-from here import here
+from .here import here
 from time import sleep
 
 lastpid = None

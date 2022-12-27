@@ -1,5 +1,5 @@
 import os
-from here import here
+from .here import here
 from tempfile import mkstemp
 
 seq = 1
