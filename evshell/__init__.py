@@ -1136,9 +1136,12 @@ class shell:
                 else:
                     cd_dir = args[1]
                 cd_dir = self.allow_cd(cd_dir)
-                os.chdir(cd_dir)
-                self.log(chdir=cd_dir)
-                self.vars["PWD"] = os.getcwd()
+                try:
+                    os.chdir(cd_dir)
+                    self.log(chdir=cd_dir)
+                    self.vars["PWD"] = os.getcwd()
+                except Exception as e:
+                    print(colored("Failed:","red"),e)
                 return
 
             if args[0] in self.funcs:

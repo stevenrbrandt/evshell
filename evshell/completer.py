@@ -93,11 +93,17 @@ class Completer:
                 matches = os.listdir(".")
             elif dirname.startswith("~/"):
                 # This is a temporary hack.
-                fix_dirname = os.path.join(home, dirname[3:])
+                fix_dirname = os.path.join(home, dirname[2:])
+                #print("fix_dirname:",fix_dirname,file=fd)
+                #fd.flush()
                 matches = [os.path.join(dirname,m) for m in os.listdir(fix_dirname)]
             else:
+                #print("dirname:",dirname,file=fd)
+                #fd.flush()
                 matches = [os.path.join(dirname,m) for m in os.listdir(dirname)]
         except Exception as e:
+            #print(e,file=fd)
+            #fd.flush()
             matches = []
         self.matches = []
         for k in matches:
