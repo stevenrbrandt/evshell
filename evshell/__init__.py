@@ -432,6 +432,7 @@ def printf(*args):
 class shell:
     
     def __init__(self,args=sys.argv, shell_name=my_shell, stdout=None, stderr=None, stdin=None):
+        self.alias_tab = {}
         self.shell_name = shell_name
         self.args = args
         self.scriptname = "bash"
@@ -502,6 +503,7 @@ class shell:
         for func in self.pyfuncs:
             funcs[func] = inspect.getsource(self.pyfuncs[func])
         print(json.dumps(funcs),file=fd)
+        print(json.dumps(self.alias_tab),file=fd)
 
     def deserialize(self, fd):
         self.vars = json.loads(fd.readline())
@@ -520,6 +522,7 @@ class shell:
         for func in funcs:
             eval(func)
             self.pyfuncs[func] = globals()[func]
+        self.alias_tab = json.loads(fd.readline())
 
     def err(self, e):
         print(colored(str(e),"red"),file=self.stderr)
@@ -536,7 +539,7 @@ class shell:
                 pe.strerror.strip(),
                 sep="", file=self.stderr)
         except OSError as e:
-            self.log(exc=pe,open=fname,rwa=rwa)
+            self.log(exc=e,open=fname,rwa=rwa)
             self.err(e)
         if sout is None:
             return open("/dev/null", rwa)
@@ -1260,6 +1263,20 @@ class shell:
                     module = __import__(modname)
                     self.pyfuncs[funcname] = getattr(module,funcname)
                     return []
+                elif args[0] == 'alias':
+                    if len(args)!=2:
+                        print(colored("alias requires exactly one argument","red"),file=self.stdout)
+                    elif g := re.match(r'^(\w+)(?:=(.*)|)', args[1]):
+                        lhs = g.group(1)
+                        if g.group(2) is None:
+                            rhs = self.alias_tab.get(lhs,'')
+                            print(f"alias {lhs}='{rhs}'",file=self.stdout)
+                            return
+                        rhs = g.group(2)
+                        self.alias_tab[lhs] = rhs
+                    else:
+                        print(colored(f"Bad argument to alias '{args[1]}'","red"),file=self.stdout)
+                    return
                 elif args[0] == 'exec':
                     exec_cmd = which(args[1])
                     args = self.allow_cmd(args[1:])
@@ -1419,6 +1436,10 @@ def interactive(shell):
         sys.stdout.flush()
         try:
             inp = input(ps)
+            if g := re.match(r'^\s*(\w+)',inp):
+                key = g.group(1)
+                if key in shell.alias_tab:
+                    inp = shell.alias_tab[key] + inp[g.end():]
             msg = shell.run_text(inp)
         except KeyboardInterrupt as ke:
             print(colored("Interrupt","red"))

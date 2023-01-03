@@ -10,7 +10,6 @@ home = pwd.getpwuid(os.getuid()).pw_dir
 
 class ExecDir:
     def __init__(self, dirname):
-        Thread.__init__(self)
         self.dirname = dirname
         self.files = []
         self.st = None
