@@ -1427,12 +1427,18 @@ def interactive(shell):
         readline.parse_and_bind("tab: complete")
     except Exception as ee:
         print(colored("Import of readline failed","red"))
+    try:
+        with open(os.path.join(home,".bash_history"),"r") as fd:
+            for line in fd.readlines():
+                readline.add_history(line.strip())
+    except Exception as ee:
+        print(colored("Prooblem reading ~/.bash_history: "+str(ee),"red"))
     msg = "EVAL"
     while True:
         if msg == "EVAL":
-            ps = colored('\U0001f370> ','yellow')
+            ps = '\1'+colored('\2\U0001f370> \1','yellow')+'\2'
         else:
-            ps = colored('\U0001f370? ','cyan')
+            ps = '\1'+colored('\2\U0001f370? \1','cyan')+'\2'
         sys.stdout.flush()
         try:
             inp = input(ps)
