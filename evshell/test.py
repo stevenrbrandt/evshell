@@ -1,9 +1,11 @@
-from . import shell, ShellExit, run_shell
+from . import shell, ShellExit, run_shell, set_enable_history
 import sys, re, os
 from subprocess import Popen, PIPE
 from .here import here
 from .colored import colored
 from .tmpfile import tmpfile
+
+set_enable_history(False)
 
 s = shell()
 

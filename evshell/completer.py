@@ -1,3 +1,4 @@
+from typing import List, Optional, Dict, Union, cast
 from threading import Thread
 import readline
 import os, re, sys
@@ -9,12 +10,12 @@ home = pwd.getpwuid(os.getuid()).pw_dir
 #fd = open("log.txt","w")
 
 class ExecDir:
-    def __init__(self, dirname):
+    def __init__(self, dirname:str)->None:
         self.dirname = dirname
-        self.files = []
-        self.st = None
+        self.files : List[str] = []
+        self.st : Optional[os.stat_result]= None
 
-    def scan(self):
+    def scan(self)->None:
         if not os.path.isdir(self.dirname):
             return
         st = os.stat(self.dirname)
@@ -31,20 +32,19 @@ class ExecDir:
             self.files.append(f)
 
 class Completer:
-    def __init__(self):
-        self.matches = []
-        self.cwd = None
-        self.path = None
-        self.cmds = []
-        self.paths = {}
+    def __init__(self) -> None:
+        self.matches : List[str] = []
+        self.cwd : Optional[str] = None
+        self.path : Optional[str] = None
+        self.cmds : List[str] = []
+        self.paths : Dict[str,ExecDir] = {}
         self.update_cmds()
 
-    def update_cmds(self):
+    def update_cmds(self)->None:
         cwd = os.getcwd()
         path = os.environ.get("PATH","")
 
         self.cmds = []
-        threads = []
         for p in os.environ.get("PATH","").split(":"):
             if p == "":
                 p = "."
@@ -55,7 +55,7 @@ class Completer:
                 self.paths[p] = e
             self.cmds += e.files
 
-    def build_matches(self, current_word):
+    def build_matches(self, current_word:str)->None:
 
         buf = readline.get_line_buffer()
         g = re.match(r'.*\s',buf)
@@ -109,7 +109,7 @@ class Completer:
             if k.startswith(buf):
                 self.matches += [k[len(buf)-len(current_word):]]
 
-    def complete(self, current_word, state):
+    def complete(self, current_word:str, state:int)->Optional[str]:
         try:
             if state == 0:
                 self.build_matches(current_word)
@@ -123,3 +123,4 @@ class Completer:
         finally:
             pass
             #fd.flush()
+        return None

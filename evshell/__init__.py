@@ -3,8 +3,9 @@
 # (1) Security for Science Gateways
 # (2) Supercharge Jupyter: Allow in-process calling of bash from Python, save ENVIRON variables, etc.
 # (3) Call python functions from bash or bash functions from python
+from typing import Optional, Dict, List, cast, Any, TypedDict, Union, Sequence, Tuple, IO
 from pwd import getpwnam, getpwuid
-from piraha import parse_peg_src, Matcher, Group, set_trace
+from piraha import parse_peg_src, Matcher, Group
 from subprocess import Popen, PIPE, STDOUT
 from .pipe_threads import PipeThread, get_lastpid, get_running, pwait
 import os
@@ -22,43 +23,75 @@ from time import time
 import json
 import pwd
 
-def prepJson(arg):
+enable_history : bool = True
+
+def set_enable_history(b : bool)->None:
+    global enable_history
+    enable_history = b
+
+class Regex:
+    def __init__(self)->None:
+        self.value : Optional['re.Match[str]']
+    def match(self,pats:str,inps:str)->Optional['re.Match[str]']:
+        self.value = re.match(pats, inps)
+        return self.value
+    def group(self,arg:int)->Optional[str]:
+        if self.value is None:
+            return None
+        return self.value.group(arg)
+
+    def end(self)->Optional[int]:
+        if self.value is None:
+            return None
+        return self.value.end()
+
+def prepJson(arg : Any)->Any:
     if arg is None:
         return []
     t = type(arg)
     if t == dict:
-        narg = {}
+        narg : Dict[str, Any] = {}
         for k in arg:
             narg[k] = prepJson(arg[k])
+        return narg
     elif t == list:
-        narg = []
-        for k in range(len(arg)):
-            narg += [prepJson(arg[k])]
+        narg2 : List[Any] = []
+        for n in range(len(arg)):
+            narg2 += [prepJson(arg[n])]
+        return narg2
     elif t == set:
-        narg = prepJson(list(arg))
+        return prepJson(list(arg))
     elif t in [int,float,bool]:
-        narg = arg
+        return arg
     else:
-        narg = str(arg)
-    return narg
+        return str(arg)
 
+class SerGroupType(TypedDict):
+    start : int
+    end : int
+    name : str
+    children : List['SerGroupType']
 
-def _serGroup(g):
+def _serGroup(g : Group)->SerGroupType:
     children = [_serGroup(child) for child in g.children]
     return {"start":g.start, "end":g.end, "name":g.name, "children":children}
 
-def serGroup(g):
+class SerType(TypedDict):
+    text : str
+    root : SerGroupType
+
+def serGroup(g :Group)->SerType:
     """
     Serialize a Piraha group data structure (parse tree).
     """
     return {"text":g.text, "root":_serGroup(g)}
 
-def _deserGroup(data, text):
+def _deserGroup(data : SerGroupType, text : str)->Group:
     g = Group(data["name"], text, data["start"], data["end"])
     g.children = [_deserGroup(c,text) for c in data["children"]]
     return g
 
-def deserGroup(data):
+def deserGroup(data : SerType)->Group:
     return _deserGroup(data["root"],data["text"])
 
 
@@ -67,32 +100,38 @@ def deserGroup(data):
 # simulated shell, we should raise ShellExit
 # instead.
 class ShellExit(Exception):
-    def __init__(self, rc):
+    def __init__(self, rc:int)->None:
         self.rc = rc
 
 # This exception is thrown for an access
 # violation.
 class ShellAccess(Exception):
-    def __init__(self, msg):
+    def __init__(self, msg:str)->None:
         self.msg = msg
-    def __str__(self):
+    def __str__(self)->str:
         return "SHELL ACCESS: "+self.msg
 
-def shell_exit(rc):
+def shell_exit(rc:int)->None:
     raise ShellExit(rc)
 
 import io
 home = pwd.getpwuid(os.getuid()).pw_dir
+history = os.path.join(home,".bash_history")
 
+my_shell : str
 if sys.argv[0] == "-c":
-    my_shell = sys.modules[__name__].__file__
+    my_shell_ = sys.modules[__name__].__file__
+    assert my_shell_ is not None
+    my_shell = my_shell_
 else:
     my_shell = os.path.realpath(sys.argv[0])
 
-Never = object()
+class NeverType:
+    pass
+Never = NeverType()
 
 class ContinueException(Exception):
-    def __init__(self,message):
+    def __init__(self,message:str)->None:
         super().__init__(message)
         self.message = message
 
@@ -101,7 +140,7 @@ class TFN:
     This class has values of True, False, and Never.
     """
 
-    def __init__(self, b):
+    def __init__(self, b:Union[bool,str,NeverType])->None:
         if b in [True, False]:
             self.b = b
         elif b == "True":
@@ -111,7 +150,7 @@ class TFN:
         else:
             self.b = Never
 
-    def toggle(self):
+    def toggle(self)->None:
         """
         Toggling turns True to False, False to True,
         and leaves Never alone.
@@ -125,13 +164,13 @@ class TFN:
         else:
             raise Exception("bad state")
 
-    def __bool__(self):
+    def __bool__(self)->bool:
         if self.b in [True, False]:
-            return self.b
+            return cast(bool,self.b)
         else:
             return False
 
-def unesc(s):
+def unesc(s:str)->str:
     """
     Remove one level of escapes (backslashes) from a string.
     """
@@ -206,34 +245,54 @@ class For:
     the information needed to implement
     for loops.
     """
-    def __init__(self,variable,values):
+    def __init__(self,variable:str,values:List[str])->None:
         self.variable = variable
         self.values = values
         self.index = 0
         self.docmd = -1
         self.donecmd = -1
-    def __repr__(self):
+    def __repr__(self)->str:
         return f"For({self.variable},{self.values},{self.docmd},{self.donecmd})"
 
 class Space:
     """
-    This class represents a literal space
+    This class represents a literal space inside a token,
+    e.g. echo 'hello world' would contain a Space.
     """
-    def __repr__(self):
+    def __repr__(self)->str:
         return " "
 
-def spaceout(a):
+TokenElement = Union[str,Group,Space,Tuple[str,Group],Tuple[str]]
+# Meaning
+# Tuple[str,Group] -> used for globs
+# Tuple[str] -> literal string, no more processing
+# Space -> literal whitespace
+Token = List[TokenElement]
+
+def is_glob_star(elem : TokenElement)->bool:
+    if type(elem) == tuple and len(elem) == 2:
+        return elem[0] == "g*"
+    else:
+        return False
+
+def is_glob_question(elem : TokenElement)->bool:
+    if type(elem) == tuple and len(elem) == 2:
+        return elem[0] == "g?"
+    else:
+        return False
+
+def spaceout(a:List[str])->List[Union[Space,str]]:
     """
     Put a space between each member of a list
     """
-    b = []
+    b : List[Union[Space,str]] = []
     for i in range(len(a)):
         if i > 0:
             b += [Space()]
-        b += [a[i]]
+        b += list([a[i]])
     return b
 
-def deglob(a):
+def deglob(a:List[str])->Sequence[Union[Space,str,Tuple[str],Tuple[str,str]]]:
     """
     Process a file glob
     """
@@ -245,12 +304,12 @@ def deglob(a):
     if not has_glob:
         return a
 
-    s = []
+    s : Token = []
     raw = ''
     for k in a:
         if isinstance(k,Group) and k.is_("glob"):
             ks = k.substring()
-            s += [("g"+ks,k)]
+            s += list([("g"+ks,k)])
             raw += ks
         elif isinstance(k,Group) and k.is_("expand"):
             here("remove this")
@@ -270,51 +329,58 @@ class Expando:
     """
     Bookkeeping class used by expandCurly.
     """
-    def __init__(self):
-        self.a = [[]]
-        self.parent = None
+    def __init__(self)->None:
+        self.a : List[List[Union[TokenElement,Expando]]] = [[]]
+        self.parent : Optional['Expando']= None
 
-    def start_new_list(self):
+    def start_new_list(self)->'Expando':
         e = Expando()
         e.parent = self
         self.a[-1] += [e]
         return e
 
-    def start_new_alternate(self):
+    def start_new_alternate(self)->None:
         self.a += [[]]
 
-    def end_list(self):
+    def end_list(self)->Optional['Expando']:
         return self.parent
 
-    def add_item(self, item):
+    def add_item(self, item : TokenElement )->None:
         self.a[-1] += [item]
 
-    def __repr__(self):
+    def __repr__(self)->str:
         return "Expando("+str(self.a)+")"
 
-    def build_strs(self):
+    def build_strs(self)->List[List[Group]]:
+        # Make a copy a in stream
         streams = [a for a in self.a]
+
+        # The result goes here
         final_streams = []
-        show = False
+
+        show : bool = False
+
         while len(streams) > 0:
             new_streams = []
             for stream in streams:
-                found = False
+                # Whether an Expand was found in the stream
+                found : bool = False
                 for i in range(len(stream)):
                     item = stream[i]
                     if isinstance(item,Expando):
                         found = True
                         show = True
                         for a in item.a:
+                            # Create a new stream with each item in a of the Expando
                             new_stream = stream[:i]+a+stream[i+1:]
                             new_streams += [new_stream]
                         break
                 if not found:
                     final_streams += [stream]
             streams = new_streams
-        return final_streams
+        return cast(List[List[Group]],final_streams)
             
-def expandCurly(a,ex=None,i=0,sub=0):
+def expandCurly(a:Token ,ex : Optional[Expando]=None,i:int=0,sub:int=0)->Expando:
     """
     The expandCurly method expands out curly braces on the command line,
     e.g. "echo {a,b}{c,d}" should produce "ac ad bc bd".
@@ -323,20 +389,26 @@ def expandCurly(a,ex=None,i=0,sub=0):
         ex = Expando()
     sub = 0
     for i in range(len(a)):
-        if isinstance(a[i], Group) and a[i].is_("expand"):
-            if a[i].substring() == "{":
-                ex = ex.start_new_list()
-            elif a[i].substring() == '}':
-                ex = ex.end_list()
-            elif a[i].substring() == ',':
-                ex.start_new_alternate()
+        assert ex is not None
+        item : TokenElement = a[i]
+        if type(item) == Group:
+            if item.is_("expand"):
+                if item.substring() == "{":
+                    ex = ex.start_new_list()
+                elif item.substring() == '}':
+                    ex = ex.end_list()
+                elif item.substring() == ',':
+                    ex.start_new_alternate()
+                else:
+                    ex.add_item(item)
             else:
-                ex.add_item(a[i])
+                ex.add_item(item)
         else:
-            ex.add_item(a[i])
+            ex.add_item(item)
+    assert ex is not None
     return ex
 
-def fmatch(fn,pat,i1=0,i2=0):
+def fmatch(fn:Optional[str],pat:Token,i1:int=0,i2:int=0)->List[str]:
     """
     Used by deglob() in processing globs in filenames.
     """
@@ -361,16 +433,16 @@ def fmatch(fn,pat,i1=0,i2=0):
             return dd
         elif i2 >= len(pat):
             return []
-        elif pat[i2][0] == 'g?':
+        elif is_glob_question(pat[i2]):
             # g? is a glob ? pattern
             i1 += 1
             i2 += 1
-        elif pat[i2][0] == 'g*':
+        elif is_glob_star(pat[i2]):
             # g* is a glob * pattern
             if i2+1 <= len(pat):
                 result = fmatch(fn, pat, i1, i2+1)
             else:
-                restult = []
+                result = []
             if i1+1 <= len(fn):
                 if len(result) == 0:
                     result = fmatch(fn, pat, i1+1, i2+1)
@@ -383,7 +455,7 @@ def fmatch(fn,pat,i1=0,i2=0):
         else:
             return []
 
-def cat(a, b):
+def cat(a : List[str], b : Union[List[str],str])->None:
     assert type(a) == list
     if type(b) == list:
         a += b
@@ -394,27 +466,33 @@ def cat(a, b):
     else:
         assert False
 
-def expandtilde(s):
-    if type(s) == str:
-        if s.startswith("~/"):
-            return home + s[1:]
-        if len(s)>0 and s[0] == '~':
-            g = re.match(r'^~(\w+)/(.*)', s)
-            if g:
-                try:
-                    pw = getpwnam(g.group(1))
-                    if pw is not None:
-                        return pw.pw_dir+"/"+g.group(2)
-                except Exception as ee:
-                    pass
-        return s
-    elif type(s) == list and len(s)>0:
-        return [expandtilde(s[0])] + s[1:]
-    else:
-        return s
+def expandtilde(slist : Token)->Token:
+    """
+    The argument s, whether it's a list or a string,
+    represents the components of a shell token.
+    """
+    new_slist : Token = []
+    for s in slist:
+        if type(s) == str:
+            if s.startswith("~/"):
+                new_slist += [home + s[1:]]
+            elif len(s)>0 and s[0] == '~':
+                g = re.match(r'^~(\w+)/(.*)', s)
+                if g:
+                    try:
+                        pw = getpwnam(g.group(1))
+                        if pw is not None:
+                            new_slist += [pw.pw_dir+"/"+g.group(2)]
+                    except Exception as ee:
+                        new_slist += [s]
+            else:
+                new_slist += [s]
+        else:
+            new_slist += [s]
+    return new_slist
 
-def printf(*args):
-    pyargs = []
+def printf(*args : Any)->None:
+    pyargs : List[Union[str,int,float]] = []
     for arg in args[1:]:
         try:
             pyargs += [int(arg)]
@@ -429,16 +507,18 @@ def printf(*args):
         pyargs += [arg]
     print(args[0] % tuple(pyargs))
 
+optio = Optional[IO[str]]
+
 class shell:
     
-    def __init__(self,args=sys.argv, shell_name=my_shell, stdout=None, stderr=None, stdin=None):
-        self.alias_tab = {}
+    def __init__(self,args : List[str]=sys.argv, shell_name:str=my_shell, stdout:optio=None, stderr:optio=None, stdin:optio=None)->None:
+        self.alias_tab : Dict[str,str] = {}
         self.shell_name = shell_name
         self.args = args
         self.scriptname = "bash"
         self.txt = ""
         self.wait_for = None
-        self.flags = {}
+        self.flags : Dict[str,bool] = {}
         self.vars = {
             "?":"0",
             "PWD":os.path.realpath(os.getcwd()),
@@ -464,9 +544,9 @@ class shell:
         self.stdin = stdin
         self.stdout = stdout
         self.stderr = stderr
-        self.lines = []
-        self.cmds = []
-        self.stack = []
+        self.lines : List[Group] = []
+        self.cmds : List[Group] = []
+        self.stack : List[Tuple[str,TFN]] = []
         self.for_loops = []
         self.case_stack = []
         self.funcs = {}
@@ -730,14 +810,14 @@ class shell:
         rpat = re.sub(r'\*','.*',gr.substring()[:-1])+'$'
         self.case_stack[-1][1] = re.match(rpat,word)
 
-    def mkargs(self, k):
+    def mkargs(self, k : Group)->List[str]:
         """
         k: An input of type Piraha.Group.
         return value: a list of strings
         """
         args = []
         # Calling eval will cause $(...) etc. to be replaced.
-        ek = self.eval(k)
+        ek : Token = self.eval(k)
         if k.has(0,"dquote") or k.has(0,"squote"):
             pass
         else:
@@ -765,7 +845,7 @@ class shell:
 
         return args
 
-    def eval(self, gr, index=-1,xending=None):
+    def eval(self, gr, index=-1,xending=None)->Token:
         assert type(gr) != list
         r = self.eval_(gr,index,xending)
         if r is None:
@@ -773,7 +853,7 @@ class shell:
         assert type(r) in [list, str], gr.dump()+" "+repr(type(r))+" r="+repr(r)
         return r
 
-    def eval_(self, gr, index=-1, xending=None):
+    def eval_(self, gr:Group, index:int=-1, xending:Optional[str]=None)->Union[str,List[Union[str,Group]]]:
         assert type(gr) != list
         if index == -1 and not gr.is_("whole_cmd"):
             index = len(self.cmds)
@@ -965,7 +1045,7 @@ class shell:
             ltgt = redir.group(rn).substring()
             if redir.has(rn+1,"word"):
                 line = redir.linenum()
-                fname = expandtilde(redir.group(rn+1).substring())
+                fname : str = "".join(expandtilde(redir.group(rn+1).substring()))
                 if ltgt == "<":
                     fname = self.allow_read(fname)
                     sin = self.open_file(fname, "r", line)
@@ -1264,9 +1344,10 @@ class shell:
                     self.pyfuncs[funcname] = getattr(module,funcname)
                     return []
                 elif args[0] == 'alias':
+                    g = Regex()
                     if len(args)!=2:
                         print(colored("alias requires exactly one argument","red"),file=self.stdout)
-                    elif g := re.match(r'^(\w+)(?:=(.*)|)', args[1]):
+                    elif g.match(r'^(\w+)(?:=(.*)|)', args[1]):
                         lhs = g.group(1)
                         if g.group(2) is None:
                             rhs = self.alias_tab.get(lhs,'')
@@ -1297,8 +1378,8 @@ class shell:
                 env = {}
                 if self.flags.get("x",False):
                     self.stderr.write("+ "+" ".join(args)+"\n")
-                for e in self.exports:
-                    env[e] = self.exports[e]
+                for eiter in self.exports:
+                    env[eiter] = self.exports[eiter]
                 try:
                     tstart = time()
                     p = PipeThread(args, stdin=sin, stdout=sout, stderr=serr, universal_newlines=True, env=env)
@@ -1397,6 +1478,9 @@ class shell:
             txt2 = txt[end:]
             if len(txt2)>0:
                 s.run_text(txt2)
+            if enable_history:
+                with open(history,"a") as fd:
+                    print(txt.strip(),file=fd)
             self.txt = ''
             self.lines += [m.gr]
             self.eval(m.gr)
@@ -1429,7 +1513,13 @@ def interactive(shell):
         print(colored("Import of readline failed","red"))
     try:
         with open(os.path.join(home,".bash_history"),"r") as fd:
+            hist = {}
+            line_num = 0
             for line in fd.readlines():
+                line_num += 1
+                hist[line] = line_num
+            hist_lines = list(hist.keys())
+            for line in sorted(hist_lines,key=lambda a: hist[a]):
                 readline.add_history(line.strip())
     except Exception as ee:
         print(colored("Prooblem reading ~/.bash_history: "+str(ee),"red"))
@@ -1442,7 +1532,8 @@ def interactive(shell):
         sys.stdout.flush()
         try:
             inp = input(ps)
-            if g := re.match(r'^\s*(\w+)',inp):
+            g = Regex()
+            if g.match(r'^\s*(\w+)',inp):
                 key = g.group(1)
                 if key in shell.alias_tab:
                     inp = shell.alias_tab[key] + inp[g.end():]
