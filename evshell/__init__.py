@@ -282,18 +282,18 @@ def is_glob_question(elem : TokenElement)->bool:
     else:
         return False
 
-def spaceout(a:List[str])->List[Union[Space,str]]:
+def spaceout(a:Token)->Token:
     """
     Put a space between each member of a list
     """
-    b : List[Union[Space,str]] = []
+    b : Token = []
     for i in range(len(a)):
         if i > 0:
             b += [Space()]
         b += list([a[i]])
     return b
 
-def deglob(a:List[str])->Sequence[Union[Space,str,Tuple[str],Tuple[str,str]]]:
+def deglob(a:Token)->Token:
     """
     Process a file glob
     """
@@ -324,7 +324,7 @@ def deglob(a:List[str])->Sequence[Union[Space,str,Tuple[str],Tuple[str,str]]]:
     if len(files) == 0:
         return [raw]
     else:
-        return spaceout(files)
+        return spaceout(list(files))
 
 class Expando:
     """
@@ -352,12 +352,12 @@ class Expando:
     def __repr__(self)->str:
         return "Expando("+str(self.a)+")"
 
-    def build_strs(self)->List[List[Group]]:
+    def build_strs(self)->List[Token]:
         # Make a copy a in stream
         streams = [a for a in self.a]
 
         # The result goes here
-        final_streams = []
+        final_streams : List[List[Union[TokenElement,Expando]]] = []
 
         show : bool = False
 
@@ -379,7 +379,7 @@ class Expando:
                 if not found:
                     final_streams += [stream]
             streams = new_streams
-        return cast(List[List[Group]],final_streams)
+        return cast(List[Token],final_streams)
             
 def expandCurly(a:Token ,ex : Optional[Expando]=None,i:int=0,sub:int=0)->Expando:
     """
@@ -837,7 +837,7 @@ class shell:
         k: An input of type Piraha.Group.
         return value: a list of strings
         """
-        args = []
+        args : List[str] = []
         # Calling eval will cause $(...) etc. to be replaced.
         ek : Token = self.eval(k)
         if k.has(0,"dquote") or k.has(0,"squote"):
@@ -849,25 +849,21 @@ class shell:
 
         # Now the tricky part. Evaluate {a,b,c} elements of the shell.
         # This can result in multiple arguments being generated.
-        exk = expandCurly(ek).build_strs()
+        exk : List[Token]= expandCurly(ek).build_strs()
+        nek : Token
         for nek in exk:
             # Evaluate globs
             nek = deglob(nek)
-            if type(nek) == str:
-                args += [nek]
-            elif type(nek) == list:
-                args += [""]
-                for kk in nek:
-                    if isinstance(kk,Space):
-                        args += [""]
-                    else:
-                        args[-1] += kk
-            else:
-                assert False
+            args += [""]
+            for kk in nek:
+                if isinstance(kk,Space):
+                    args += [""]
+                else:
+                    args[-1] += str(kk)
 
         return args
 
-    def eval(self, gr, index=-1,xending=None)->Token:
+    def eval(self, gr:Group, index:int=-1,xending:Optional[str]=None)->Token:
         assert type(gr) != list
         r = self.eval_(gr,index,xending)
         if r is None:
