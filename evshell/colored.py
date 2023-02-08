@@ -1,3 +1,4 @@
+from typing import Any
 import sys
 
 def not_colored(a,_):
@@ -13,7 +14,7 @@ colors = {
 }
 reset = "\033[0m"
 
-def colored(arg,c):
+def colored(arg:Any,c:str)->str:
     assert type(c) == str
     assert c in colors
     s = str(arg)

@@ -1,3 +1,4 @@
+from typing import Optional
 from threading import Thread, RLock
 from subprocess import Popen, PIPE, STDOUT
 from traceback import print_exc
@@ -5,9 +6,9 @@ import os
 from .here import here
 from time import sleep
 
-lastpid = None
+lastpid : Optional[int] = None
 
-def get_lastpid():
+def get_lastpid()->Optional[int]:
     return lastpid
 
 runningLock = RLock()

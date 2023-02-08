@@ -3,6 +3,7 @@
 # (1) Security for Science Gateways
 # (2) Supercharge Jupyter: Allow in-process calling of bash from Python, save ENVIRON variables, etc.
 # (3) Call python functions from bash or bash functions from python
+from collections.abc import MutableMapping
 from typing import Optional, Dict, List, cast, Any, TypedDict, Union, Sequence, Tuple, IO
 from pwd import getpwnam, getpwuid
 from piraha import parse_peg_src, Matcher, Group
@@ -509,6 +510,13 @@ def printf(*args : Any)->None:
 
 optio = Optional[IO[str]]
 
+class Case:
+    def __init__(self, word:str, active:bool):
+        self.word = word
+        self.active = active
+    def __repr__(self)->str:
+        return f"Case('{self.word}',{self.active}"
+
 class shell:
     
     def __init__(self,args : List[str]=sys.argv, shell_name:str=my_shell, stdout:optio=None, stderr:optio=None, stdin:optio=None)->None:
@@ -536,7 +544,7 @@ class shell:
         for vnum in range(len(args)):
             self.vars[str(vnum)] = args[vnum]
 
-        self.exports = {}
+        self.exports : MutableMapping[str,str] = {}
         for var in os.environ:
             if var not in self.vars:
                 self.vars[var] = os.environ[var]
@@ -547,14 +555,14 @@ class shell:
         self.lines : List[Group] = []
         self.cmds : List[Group] = []
         self.stack : List[Tuple[str,TFN]] = []
-        self.for_loops = []
-        self.case_stack = []
-        self.funcs = {}
+        self.for_loops : List[For] = []
+        self.case_stack : List[Case] = []
+        self.funcs : Dict[str,List[Group]] = {}
         self.pyfuncs = { "printf" : printf}
-        self.save_in = []
-        self.save_out = []
-        self.last_ending = None
-        self.curr_ending = None
+        self.save_in : List[IO[str]] = []
+        self.save_out : List[IO[str]] = []
+        self.last_ending : Optional[str] = None
+        self.curr_ending : Optional[str] = None
         self.last_pipe = None
         self.recursion = 0
         self.max_recursion_depth = 2000
@@ -564,7 +572,7 @@ class shell:
         self.log_fd = open(log_file,"w")
         self.log(msg="starting shell")
 
-    def serialize(self, fd):
+    def serialize(self, fd:IO[str])->None:
         print(json.dumps(self.vars),file=fd)
         print(json.dumps(self.exports),file=fd)
         print(json.dumps({
@@ -579,13 +587,13 @@ class shell:
         print(json.dumps(funcser),file=fd)
 
         import inspect
-        funcs = {}
+        funcs : Dict[str,str] = {}
         for func in self.pyfuncs:
             funcs[func] = inspect.getsource(self.pyfuncs[func])
         print(json.dumps(funcs),file=fd)
         print(json.dumps(self.alias_tab),file=fd)
 
-    def deserialize(self, fd):
+    def deserialize(self, fd:IO[str])->None:
         self.vars = json.loads(fd.readline())
         self.exports = json.loads(fd.readline())
         data = json.loads(fd.readline())
@@ -604,11 +612,11 @@ class shell:
             self.pyfuncs[func] = globals()[func]
         self.alias_tab = json.loads(fd.readline())
 
-    def err(self, e):
+    def err(self, e:Any)->None:
         print(colored(str(e),"red"),file=self.stderr)
 
-    def open_file(self, fname, rwa, line):
-        sout = None
+    def open_file(self, fname:str, rwa:str, line:int)->IO[str]:
+        sout : Optional[IO[str]] = None
         try:
             sout = open(fname, rwa)
             self.log(open=fname,rwa=rwa)
@@ -627,32 +635,32 @@ class shell:
             self.stderr.flush()
         return sout
     
-    def env_is_bound(self):
+    def env_is_bound(self)->bool:
         return os.environ is self.exports
 
-    def bind_to_env(self):
+    def bind_to_env(self)->None:
         assert self.exports is not os.environ
         for v in os.environ:
             self.vars[v] = os.environ[v]
         self.exports = os.environ
 
-    def unbind_from_env(self):
+    def unbind_from_env(self)->None:
         assert self.exports is os.environ
         new_exports = {}
         for v in os.environ:
             new_exports[v] = self.vars[v] =  os.environ[v]
         self.exports = new_exports
 
-    def log_flush(self):
+    def log_flush(self)->None:
         self.log_fd.flush()
 
-    def log_exc(self,e):
+    def log_exc(self,e : Exception)->None:
         print_exc()
         self.log_flush()
         self.log(exc=e)
         self.log_flush()
 
-    def log(self,**kwargs):
+    def log(self,**kwargs:Any)->None:
         self.log_flush()
         args = prepJson(kwargs)
         if "time" not in args:
@@ -661,7 +669,7 @@ class shell:
         print(json.dumps(args),file=self.log_fd)
         self.log_flush()
 
-    def unset_var(self,vname):
+    def unset_var(self,vname:str)->None:
         val = self.allow_set_var(vname, None)
         if val == None:
             unset = False
@@ -677,42 +685,46 @@ class shell:
                 pass
             self.log(unset=vname)
 
-    def get_var(self,vname):
+    def get_var(self,vname:str)->str:
         if vname in self.exports:
             return self.exports[vname]
         else:
             return self.vars.get(vname,"")
 
-    def set_var(self,vname,value):
+    def set_var(self,vname:str,value:Optional[str])->None:
         self.log(setvar=vname,value=value)
         assert vname != "2"
         value = self.allow_set_var(vname, value)
-        self.vars[vname] = value
-        if self.flags.get("a",False):
-            self.exports[vname] = value
+        if value is None:
+            del self.vars[vname]
+            del self.exports[vname]
+        else:
+            self.vars[vname] = value
+            if self.flags.get("a",False):
+                self.exports[vname] = value
 
-    def allow_cd(self, cd_dir):
+    def allow_cd(self, cd_dir:str)->str:
         return cd_dir
 
-    def allow_cmd(self, args):
+    def allow_cmd(self, args:List[str])->List[str]:
         return args
 
-    def allow_read(self, fname):
+    def allow_read(self, fname:str)->str:
         return fname
 
-    def allow_write(self, fname):
+    def allow_write(self, fname:str)->str:
         return fname
 
-    def allow_append(self, fname):
+    def allow_append(self, fname:str)->str:
         return fname
 
-    def allow_set_var(self,var,val):
+    def allow_set_var(self,var:str,val:Optional[str])->Optional[str]:
         return val
 
-    def allow_access_var(self,var):
+    def allow_access_var(self,var:str)->None:
         pass
 
-    def lookup_var(self,gr):
+    def lookup_var(self,gr:Group)->Token:
         """
         lookup_var() converts a Piraha.Group to a list of strings.
         The output needs to be a list so that code like this runs
@@ -722,31 +734,41 @@ class shell:
         for i in $a; do echo $i; done
         ```
         """
-        varname = gr.has(0).substring()
+        vgr = gr.has(0)
+        if vgr is None:
+            return []
+        varname = vgr.substring()
         if varname == "$":
             return [str(os.getpid())]
         elif varname == "!":
             return [str(get_lastpid())]
         self.allow_access_var(varname)
         if varname in self.vars:
-            v = spaceout(re.split(r'\s+', self.get_var(varname)))
+            v1 = spaceout(re.split(r'\s+', self.get_var(varname)))
+        else:
+            v1 = None
+        if v1 is None and gr.has(1,"unset"):
+            v = self.eval(gr.children[2])
+        elif v1 is None and gr.has(1,"unset_raw"):
+            v = self.eval(gr.children[2])
+        elif v1 is not None:
+            v = list(v1)
         else:
             v = None
-        if v is None and gr.has(1,"unset"):
-            v = self.eval(gr.children[2])
-        elif v is None and gr.has(1,"unset_raw"):
-            v = self.eval(gr.children[2])
+
+        # Remove the back part of a variable name
         rmb = gr.has(1,"rm_back")
         if rmb:
-            back = gr.children[2].substring()
-            if len(v) > 0 and v[0].endswith(back):
-                v[0] = v[0][:-len(back)]
+            back = "".join([str(x) for x in self.eval(gr.children[2])])
+            if v is not None and len(v) > 0 and type(v[0]) == str:
+                if v[0].endswith(back):
+                    v[0] = v[0][:-len(back)]
         if v is None:
             return [""]
         else:
             return v
 
-    def evaltest(self, args, index=0):
+    def evaltest(self, args : List[str], index:int=0)->Optional[bool]:
         """
         Process calls to `test` or `if`, optimizing in some cases.
         """
@@ -805,10 +827,10 @@ class shell:
             evalresult = self.vars["?"] == "0"
         return evalresult
 
-    def do_case(self, gr):
-        word = self.case_stack[-1][0]
+    def do_case(self, gr:Group)->None:
+        word = self.case_stack[-1].word
         rpat = re.sub(r'\*','.*',gr.substring()[:-1])+'$'
-        self.case_stack[-1][1] = re.match(rpat,word)
+        self.case_stack[-1].active = re.match(rpat,word) != None
 
     def mkargs(self, k : Group)->List[str]:
         """
@@ -993,7 +1015,7 @@ class shell:
             if gr.has(0,"word"):
                 args = self.mkargs(gr.group(0))
                 assert len(args)==1
-                self.case_stack += [[args[0],False]]
+                self.case_stack += [Case(args[0],False)]
             assert gr.has(-1,"casepattern")
             self.do_case(gr.group(-1))
         elif gr.is_("case2"):
@@ -1102,7 +1124,7 @@ class shell:
         for name in self.exports:
             os.environ[name] = self.vars[name]
 
-    def evalargs(self, args, redir, skip, xending, index, gr):
+    def evalargs(self, args:List[str], redir:Optional[Group], skip:bool, xending:Optional[str], index:int, gr:Optional[Group])->None:
         try:
             if len(args)>0:
                 if args[0] == "do":
@@ -1188,7 +1210,7 @@ class shell:
             if len(self.stack) > 0:
                 skip = not self.stack[-1][1]
             if len(self.case_stack) > 0:
-                if not self.case_stack[-1][1]:
+                if not self.case_stack[-1].active:
                     skip = True
             if len(self.for_loops)>0:
                 f = self.for_loops[-1]
