@@ -864,15 +864,12 @@ class shell:
         return args
 
     def eval(self, gr:Group, index:int=-1,xending:Optional[str]=None)->Token:
-        assert type(gr) != list
         r = self.eval_(gr,index,xending)
         if r is None:
             r = []
-        assert type(r) in [list, str], gr.dump()+" "+repr(type(r))+" r="+repr(r)
         return r
 
-    def eval_(self, gr:Group, index:int=-1, xending:Optional[str]=None)->Union[str,List[Union[str,Group]]]:
-        assert type(gr) != list
+    def eval_(self, gr:Group, index:int=-1, xending:Optional[str]=None)->Token:
         if index == -1 and not gr.is_("whole_cmd"):
             index = len(self.cmds)
             self.cmds += [gr]
@@ -948,6 +945,7 @@ class shell:
             assert gr.children[0].is_("ident")
             ident = gr.children[0].substring()
             self.funcs[ident] = gr.children[1:]
+            return []
         elif gr.is_("subproc"):
             out_pipe = os.pipe()
             pid = os.fork()
@@ -1014,6 +1012,7 @@ class shell:
                 self.case_stack += [Case(args[0],False)]
             assert gr.has(-1,"casepattern")
             self.do_case(gr.group(-1))
+            return []
         elif gr.is_("case2"):
             if gr.has(0,"casepattern"):
                 self.do_case(gr.group(0))
@@ -1021,6 +1020,7 @@ class shell:
                 self.case_stack = self.case_stack[:-1]
             else:
                 assert False
+            return []
         elif gr.is_("subshell"):
             out_pipe = os.pipe()
             pid = os.fork()
