@@ -527,6 +527,7 @@ class shell:
         self.txt = ""
         self.wait_for = None
         self.flags : Dict[str,bool] = {}
+        self.curr_pipe : Optional[Tuple[int,int]] = None
         self.vars = {
             "?":"0",
             "PWD":os.path.realpath(os.getcwd()),
@@ -549,9 +550,9 @@ class shell:
             if var not in self.vars:
                 self.vars[var] = os.environ[var]
             self.exports[var] = self.vars[var]
-        self.stdin = stdin
-        self.stdout = stdout
-        self.stderr = stderr
+        self.stdin : optio = stdin
+        self.stdout : optio = stdout
+        self.stderr : optio = stderr
         self.lines : List[Group] = []
         self.cmds : List[Group] = []
         self.stack : List[Tuple[str,TFN]] = []
@@ -900,11 +901,13 @@ class shell:
             else:
                 self.curr_pipe = None
             if self.curr_pipe is not None:
+                assert self.stdout is not None
                 self.save_out += [self.stdout]
-                self.stdout = self.curr_pipe[1]
+                assert self.curr_pipe is not None
+                self.stdout = os.fdopen(self.curr_pipe[1], "w")
             if self.last_pipe is not None:
                 self.save_in += [self.stdin]
-                self.stdin = self.last_pipe[0]
+                self.stdin = os.fdopen(self.last_pipe[0], "r")
 
             redir = None
             for k in gr.children:
