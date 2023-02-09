@@ -456,17 +456,6 @@ def fmatch(fn:Optional[str],pat:Token,i1:int=0,i2:int=0)->List[str]:
         else:
             return []
 
-def cat(a : List[str], b : Union[List[str],str])->None:
-    assert type(a) == list
-    if type(b) == list:
-        a += b
-    elif type(b) == str:
-        if len(a) == 0:
-            a += [""]
-        a[-1] += b
-    else:
-        assert False
-
 def expandtilde(slist : Token)->Token:
     """
     The argument s, whether it's a list or a string,
@@ -833,6 +822,21 @@ class shell:
         rpat = re.sub(r'\*','.*',gr.substring()[:-1])+'$'
         self.case_stack[-1].active = re.match(rpat,word) != None
 
+    def mkargsFromToken(self, t : Token)->List[str]:
+        ls : List[str] = [""]
+        for te in t:
+            if type(te) == Group:
+                new_args : List[str] = self.mkargs(te)
+                ls[-1] += new_args[0] 
+                ls += new_args[1:]
+            elif type(te) == str:
+                ls[-1] += te
+            elif type(te) == Space:
+                ls += [""]
+            else:
+                raise Exception()
+        return ls
+
     def mkargs(self, k : Group)->List[str]:
         """
         k: An input of type Piraha.Group.
@@ -917,7 +921,7 @@ class shell:
                      args += self.mkargs(k)
     
             if args == ['']:
-                return args
+                return ['']
             return self.evalargs(args, redir, skip, xending, index, gr)
 
         elif gr.is_("glob"):
@@ -925,25 +929,25 @@ class shell:
         elif gr.is_("expand"):
             return [gr]
         elif gr.is_("word") or gr.is_("word2") or gr.is_("words2"):
-            s = []
+            s : Token = []
             for c in gr.children:
-                cat(s, self.eval(c))
+                s += self.eval(c)
             if gr.has(-1,"eword"):
                 here("eword found:",gr.dump())
             return s 
         elif gr.is_("raw_word"):
             return [unesc(gr.substring())]
         elif gr.is_("math"):
-            mtxt = ''
+            mtxt : str = ''
             for gc in gr.children:
                 if gc.is_("mathchar"):
                     mtxt += gc.substring()
                 else:
-                    mtxt += self.lookup_var(gc)[0]
+                    mtxt += self.mkargsFromToken(self.lookup_var(gc))[0]
             try:
-                return str(eval(mtxt)).strip()
+                return [str(eval(mtxt)).strip()]
             except Exception as ee:
-                return f"ERROR({mtxt})"
+                return [f"ERROR({mtxt})"]
         elif gr.is_("func"):
             assert gr.children[0].is_("ident")
             ident = gr.children[0].substring()
@@ -955,7 +959,7 @@ class shell:
             if pid == 0:
                 os.close(1)
                 os.dup(out_pipe[1])
-                self.stdout = 1
+                self.stdout = sys.stdout
                 os.close(out_pipe[0])
                 os.close(out_pipe[1])
                 for c in gr.children:
@@ -963,26 +967,20 @@ class shell:
                 os._exit(int(self.vars["?"]))
             assert pid != 0
             os.close(out_pipe[1])
-            result = os.read(out_pipe[0],10000).decode()
+            result2 = os.read(out_pipe[0],10000).decode()
             os.close(out_pipe[0])
             rc=os.waitpid(pid,0)
-            return spaceout(re.split(r'\s+',result.strip()))
+            return spaceout(re.split(r'\s+',result2.strip()))
         elif gr.is_("dquote"):
-            s = ""
+            ss : str= ""
             for c in gr.children:
                 r = self.eval(c)
-                if type(r) == str:
-                    s += r
-                else:
-                    assert type(r) == list, "t=%s r=%s %s" % (type(r), r, c.dump())
-                    for k in r:
-                        if isinstance(k,Space):
-                            s += ' '
-                        else:
-                            s += k
-            assert type(s) == str
-            #here("s=",s)
-            return s
+                for kk in r:
+                    if isinstance(kk,Space):
+                        ss += ' '
+                    else:
+                        ss += kk
+            return ss
         elif gr.is_("dchar"):
             return gr.substring()
         elif gr.is_("squote"):
@@ -1123,7 +1121,7 @@ class shell:
         for name in self.exports:
             os.environ[name] = self.vars[name]
 
-    def evalargs(self, args:List[str], redir:Optional[Group], skip:bool, xending:Optional[str], index:int, gr:Optional[Group])->None:
+    def evalargs(self, args:List[str], redir:Optional[Group], skip:bool, xending:Optional[str], index:int, gr:Optional[Group])->Token:
         try:
             if len(args)>0:
                 if args[0] == "do":
