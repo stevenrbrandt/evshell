@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Optional, Dict, Any, Tuple
 from threading import Thread, RLock
 from subprocess import Popen, PIPE, STDOUT
 from traceback import print_exc
@@ -12,9 +12,9 @@ def get_lastpid()->Optional[int]:
     return lastpid
 
 runningLock = RLock()
-running = {}
+running : Dict[int,'PipeThread'] = {}
 
-def get_running(pid, verbose=False):
+def get_running(pid:int, verbose:bool=False)->Optional['PipeThread']:
     with runningLock:
         if pid is None:
             for k in running:
@@ -26,7 +26,7 @@ def get_running(pid, verbose=False):
                 return
         return running.get(pid,None)
 
-def pwait(pid):
+def pwait(pid:Optional[int])->Optional['PipeThread']:
     if pid is not None:
         with runningLock:
             p = running.get(pid,None)
@@ -47,11 +47,11 @@ def pwait(pid):
     return None
 
 class PipeRunner(Thread):
-    def __init__(self):
+    def __init__(self)->None:
         Thread.__init__(self)
         self.setDaemon(True)
 
-    def run(self):
+    def run(self)->None:
         count = 0
         while True:
             with runningLock:
@@ -73,19 +73,17 @@ _pipe_runner = PipeRunner()
 _pipe_runner.start()
 
 class PipeThread: #(Thread):
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args:Any, **kwargs:Any)->None:
         #Thread.__init__(self)
         self.args = args
         self.kwargs = kwargs
-        self.p = None
-        self.pid = None
-        self.result = None
-        self.returncode = None
+        self.result : Optional[Tuple[str,str]] = None
+        self.returncode : Optional[int] = None
         self.p = Popen(*self.args,**self.kwargs)
-        self.pid = self.p.pid
+        self.pid : int = self.p.pid
         self.run_in_background = False
 
-    def background(self):
+    def background(self)->None:
         """
         Call this method before start if the
         intent is to run in the background.
@@ -96,10 +94,11 @@ class PipeThread: #(Thread):
         with runningLock:
             running[self.pid] = self
 
-    def start(self):
+    def start(self)->None:
         pass
 
-    def run(self):
+    def run(self)->None:
+        assert self.p is not None
         self.result = self.p.communicate()
         self.returncode = self.p.returncode
         if "stdout" in self.kwargs and type(self.kwargs["stdout"]) == int:
@@ -107,13 +106,13 @@ class PipeThread: #(Thread):
             if fd > 2:
                 os.close(self.kwargs["stdout"])
 
-    def is_running(self):
+    def is_running(self)->bool:
         return self.p.poll() is None
 
-    def getpid(self):
+    def getpid(self)->Optional[int]:
         return self.pid
 
-    def communicate(self):
+    def communicate(self)->Optional[Tuple[str,str]]:
         if self.run_in_background:
             while self.returncode is None:
                 sleep(.01)
@@ -129,6 +128,10 @@ if __name__ == "__main__":
     p1.start()
     p2 = PipeThread(["sed","s/h/H/"], universal_newlines=True, stdin=pipe[0], stdout=PIPE, env=env)
     p2.start();
-    o, e = p2.communicate()
-    o, e = p2.communicate()
+    t = p2.communicate()
+    if t is not None:
+        o, e = t
+    t = p2.communicate()
+    if t is not None:
+        o, e = t
     print("out:",o,end='')

@@ -4,7 +4,7 @@
 # (2) Supercharge Jupyter: Allow in-process calling of bash from Python, save ENVIRON variables, etc.
 # (3) Call python functions from bash or bash functions from python
 from collections.abc import MutableMapping
-from typing import Optional, Dict, List, cast, Any, TypedDict, Union, Sequence, Tuple, IO
+from typing import Optional, Dict, List, cast, Any, TypedDict, Union, Sequence, Tuple, IO, Callable
 from pwd import getpwnam, getpwuid
 from piraha import parse_peg_src, Matcher, Group
 from subprocess import Popen, PIPE, STDOUT
@@ -481,7 +481,9 @@ def expandtilde(slist : Token)->Token:
             new_slist += [s]
     return new_slist
 
-def printf(*args : Any)->None:
+pyfunc_t = Callable[[List[str]],Token]
+
+def printf(args : List[str])->Token:
     pyargs : List[Union[str,int,float]] = []
     for arg in args[1:]:
         try:
@@ -496,6 +498,7 @@ def printf(*args : Any)->None:
             pass
         pyargs += [arg]
     print(args[0] % tuple(pyargs))
+    return []
 
 optio = Optional[IO[str]]
 
@@ -514,9 +517,9 @@ class shell:
         self.args = args
         self.scriptname = "bash"
         self.txt = ""
-        self.wait_for = None
         self.flags : Dict[str,bool] = {}
         self.curr_pipe : Optional[Tuple[int,int]] = None
+        self.last_pipe : Optional[Tuple[int,int]] = None
         self.vars = {
             "?":"0",
             "PWD":os.path.realpath(os.getcwd()),
@@ -548,12 +551,11 @@ class shell:
         self.for_loops : List[For] = []
         self.case_stack : List[Case] = []
         self.funcs : Dict[str,List[Group]] = {}
-        self.pyfuncs = { "printf" : printf}
+        self.pyfuncs : Dict[str,pyfunc_t] = { "printf" : printf}
         self.save_in : List[IO[str]] = []
         self.save_out : List[IO[str]] = []
         self.last_ending : Optional[str] = None
         self.curr_ending : Optional[str] = None
-        self.last_pipe = None
         self.recursion = 0
         self.max_recursion_depth = 2000
         log_file_dir = os.path.join(self.vars["HOME"],".evshell-logs")
@@ -910,6 +912,7 @@ class shell:
                 assert self.curr_pipe is not None
                 self.stdout = os.fdopen(self.curr_pipe[1], "w")
             if self.last_pipe is not None:
+                #assert self.stdin is not None
                 self.save_in += [self.stdin]
                 self.stdin = os.fdopen(self.last_pipe[0], "r")
 
@@ -976,23 +979,25 @@ class shell:
             for c in gr.children:
                 r = self.eval(c)
                 for kk in r:
-                    if isinstance(kk,Space):
+                    if type(kk) == Space:
                         ss += ' '
-                    else:
+                    elif type(kk) == str:
                         ss += kk
-            return ss
+                    else:
+                        assert False
+            return [ss]
         elif gr.is_("dchar"):
-            return gr.substring()
+            return [gr.substring()]
         elif gr.is_("squote"):
-            return gr.substring()[1:-1]
+            return [gr.substring()[1:-1]]
         elif gr.is_("dlit"):
-            s = gr.substring()
-            if s == "\\n":
-                return "\n"
-            elif s == "\\r":
-                return "\r"
+            sl : str = gr.substring()
+            if sl == "\\n":
+                return ["\n"]
+            elif sl == "\\r":
+                return ["\r"]
             else:
-                return s[1]
+                return [sl[1]]
         elif gr.is_("var"):
             return self.lookup_var(gr)
         elif gr.has(0,"fd_from") and gr.has(1,"fd_to"):
@@ -1000,10 +1005,10 @@ class shell:
             fd_to = gr.children[1].substring()
             if fd_from == "2" and fd_to == "&1":
                 self.stderr = self.stdout
-                return None
+                return []
             elif fd_from == "1" and fd_to == "&2":
                 self.stdout = self.stderr
-                return None
+                return []
             else:
                 raise Exception(f"{fd_from} and {fd_to}")
         elif gr.is_("case"):
@@ -1027,7 +1032,7 @@ class shell:
             pid = os.fork()
             if pid == 0:
                 os.close(1)
-                self.stdout = 1
+                self.stdout = sys.stdout
                 os.dup(out_pipe[1])
                 os.close(out_pipe[0])
                 os.close(out_pipe[1])
@@ -1038,10 +1043,8 @@ class shell:
             os.close(out_pipe[1])
             out = os.read(out_pipe[0],10000).decode()
             os.close(out_pipe[0])
-            if type(self.stdout) == int:
-                os.write(self.stdout, out.encode())
-            else:
-                self.stdout.write(out)
+            assert self.stdout is not None
+            self.stdout.write(out)
             rc=os.waitpid(pid,0)
             self.vars["?"] = str(rc[1])
             self.log(msg="end subshell",rc=self.vars["?"])
@@ -1053,7 +1056,7 @@ class shell:
             raise Exception(gr.getPatternName()+": "+gr.substring())
             return [gr.substring()]
 
-    def do_redir(self, redir, sout, serr, sin):
+    def do_redir(self, redir:Group, sout:optio, serr:optio, sin:optio)->Tuple[optio,optio,optio,bool]:
         out_is_error = False
         fd_from = None
         rn = 0
@@ -1064,15 +1067,14 @@ class shell:
             ltgt = redir.group(rn).substring()
             if redir.has(rn+1,"word"):
                 line = redir.linenum()
-                fname : str = "".join(expandtilde(redir.group(rn+1).substring()))
+                fname : str = "".join([str(x) for x in expandtilde([redir.group(rn+1).substring()])])
                 if ltgt == "<":
                     fname = self.allow_read(fname)
                     sin = self.open_file(fname, "r", line)
                 elif ltgt == "<<":
                     # fname is not a file name here,
                     # but a symbol such as EOF
-                    here()
-                    self.wait_for = fname
+                    assert False
                 elif ltgt == ">":
                     fname = self.allow_write(fname)
                     if fd_from is None or fd_from == "1":
@@ -1092,18 +1094,17 @@ class shell:
                 else:
                     assert False, redir.dump()
             elif redir.has(rn+1,"fd_to"):
-                here()
                 if redir.group(rn+1).substring() == "&2":
                     assert fd_from is None or fd_from=="1"
-                    if sout == -1 and serr == -1:
+                    if sout is None and serr is None:
                         stderr = STDOUT
                         out_is_error = True
-                    elif sout == -1 or serr == -1:
+                    elif sout is None or serr is None:
                         assert False
                     sout = serr
                 elif redir.group(rn+1).substring() == "&1":
                     assert fd_from is None or fd_from=="2"
-                    if sout == -1 and serr == -1:
+                    if sout is None and serr is None:
                         stderr = STDOUT
                     serr = sout
                 else:
@@ -1117,7 +1118,7 @@ class shell:
             raise Exception()
         return sout, serr, sin, out_is_error
 
-    def update_env(self):
+    def update_env(self)->None:
         for name in self.exports:
             os.environ[name] = self.vars[name]
 
@@ -1130,7 +1131,7 @@ class shell:
                         f.docmd = index
                     args = args[1:]
                     if len(args) == 0:
-                        return
+                        return []
 
                 if args[0] == 'export':
                     for a in args[1:]:
@@ -1142,7 +1143,7 @@ class shell:
                             self.exports[varname] = self.vars[varname]
                         elif a in self.vars:
                             self.exports[a] = self.vars[a]
-                    return
+                    return []
 
                 if args[0] == "for":
                     f = For(args[1],args[3:])
@@ -1151,7 +1152,7 @@ class shell:
                     if f.index < len(f.values):
                         #self.vars[f.variable] = f.values[f.index]
                         self.set_var(f.variable, f.values[f.index])
-                    return
+                    return []
 
                 if args[0] == "done":
                     f = self.for_loops[-1]
@@ -1165,18 +1166,18 @@ class shell:
                             for cmdnum in range(f.docmd,f.donecmd):
                                 self.eval(self.cmds[cmdnum], cmdnum)
                     self.for_loops = self.for_loops[:-1]
-                    return
+                    return []
 
                 if args[0] == "then":
                     args = args[1:]
                     if len(args) == 0:
-                        return
+                        return []
 
                 elif args[0] == "else":
                     args = args[1:]
                     self.stack[-1][1].toggle()
                     if len(args) == 0:
-                        return
+                        return []
 
                 if args[0] == "if":
                     testresult = None
@@ -1192,8 +1193,9 @@ class shell:
                         #  6 5 4 3 2 1 
                         testresult = self.evaltest(args)
                         if testresult is None:
-                            pass #here(gr.dump())
-                        self.stack += [("if",TFN(testresult))]
+                            self.stack += [("if",TFN(Never))]
+                        else:
+                            self.stack += [("if",TFN(testresult))]
                 elif args[0] == "fi":
                     self.stack = self.stack[:-1]
                 g = re.match(r'(\w+)=(.*)', args[0])
@@ -1202,7 +1204,7 @@ class shell:
                     value = g.group(2)
                     #self.vars[varname] = value
                     self.set_var(varname, value)
-                    return
+                    return []
 
             if len(self.stack) > 0:
                 skip = not self.stack[-1][1]
@@ -1229,8 +1231,9 @@ class shell:
             if args[0] == "wait":
                 result = None
                 p = pwait(None)
-                print("pid:",p.getpid(),"cmd:",p.args[0])
-                self.log(msg="end wait",pid=p.getpid(),rc=p.returncode)
+                if p is not None:
+                    print("pid:",p.getpid(),"cmd:",p.args[0], file=self.stdout)
+                    self.log(msg="end wait",pid=p.pid,rc=p.returncode)
                 return []
             if args[0] == "cd":
                 if len(args) == 1:
@@ -1244,7 +1247,7 @@ class shell:
                     self.vars["PWD"] = os.getcwd()
                 except Exception as e:
                     print(colored("Failed:","red"),e)
-                return
+                return []
 
             if args[0] in self.funcs:
                 # Invoke a function
@@ -1283,28 +1286,29 @@ class shell:
             elif args[0] in self.pyfuncs:
                 # Invoke a python function
                 try:
-                    return self.pyfuncs[args[0]](*args[1:])
+                    return self.pyfuncs[args[0]](args[1:])
                 except Exception as e:
                     print(colored(f"'{args[0]}' threw '{type(e)}: {e}'","red"))
                     return []
             elif args[0] == "unset":
                 for a in args[1:]:
                     self.unset_var(a)
-                return
+                return []
             elif args[0] == "set":
                 for a in args[1:]:
                     if a[0] == '-':
-                        for c in a[1:]:
-                            self.flags[c] = True
+                        for cc in a[1:]:
+                            self.flags[cc] = True
                     elif a[0] == '+':
-                        for c in a[1:]:
-                            self.flags[c] = False
-                return
+                        for cc in a[1:]:
+                            self.flags[cc] = False
+                return []
             elif args[0] in ["source", "."]:
                 assert len(args)==2
+                assert gr is not None
                 with self.open_file(args[1],"r",gr.linenum()) as fd:
                     self.run_text(fd.read())
-                    return
+                    return []
             elif args[0] not in ["if","then","else","fi","for","done","case","esac"]:
                 sout = self.stdout
                 serr = self.stderr
@@ -1324,7 +1328,7 @@ class shell:
                 if redir is not None:
                     sout,serr,sin,out_is_error = self.do_redir(redir,sout,serr,sin)
                 if len(args) == 0 or args[0] is None:
-                    return ""
+                    return []
                 if os.path.exists(args[0]):
                     if gr is None:
                         gr_line = 0
@@ -1363,20 +1367,21 @@ class shell:
                     self.pyfuncs[funcname] = getattr(module,funcname)
                     return []
                 elif args[0] == 'alias':
-                    g = Regex()
+                    gx = Regex()
                     if len(args)!=2:
                         print(colored("alias requires exactly one argument","red"),file=self.stdout)
-                    elif g.match(r'^(\w+)(?:=(.*)|)', args[1]):
-                        lhs = g.group(1)
-                        if g.group(2) is None:
+                    elif gx.match(r'^(\w+)(?:=(.*)|)', args[1]) != None:
+                        lhs = gx.group(1)
+                        if gx.group(2) is None and lhs is not None:
                             rhs = self.alias_tab.get(lhs,'')
                             print(f"alias {lhs}='{rhs}'",file=self.stdout)
-                            return
-                        rhs = g.group(2)
-                        self.alias_tab[lhs] = rhs
+                            return []
+                            rhs = gx.group(2)
+                            if rhs is not None:
+                                self.alias_tab[lhs] = rhs
                     else:
                         print(colored(f"Bad argument to alias '{args[1]}'","red"),file=self.stdout)
-                    return
+                    return []
                 elif args[0] == 'exec':
                     exec_cmd = which(args[1])
                     args = self.allow_cmd(args[1:])
@@ -1389,14 +1394,15 @@ class shell:
                         fno = gr.linenum()
                     print(f"{self.scriptname}: line {fno}: {args[0]}: command not found",file=self.stderr)
                     self.log(args=args,msg="command not found",line=fno)
-                    self.vars["?"] = 1
+                    self.vars["?"] = "1"
                     if self.flags.get("e",False):
                         shell_exit(1)
-                    return ""
+                    return []
                 args = self.allow_cmd(args)
                 env = {}
                 if self.flags.get("x",False):
-                    self.stderr.write("+ "+" ".join(args)+"\n")
+                    if self.stderr is not None:
+                        self.stderr.write("+ "+" ".join(args)+"\n")
                 for eiter in self.exports:
                     env[eiter] = self.exports[eiter]
                 try:
@@ -1411,7 +1417,8 @@ class shell:
                     p.background()
                     p.start()
                 elif xending == "|":
-                    p.setDaemon(True)
+                    assert p is not None
+                    #p.setDaemon(True)
                     p.start()
                     return []
                 else:
@@ -1421,7 +1428,7 @@ class shell:
                     self.log(msg="end", rc=self.vars["?"], pid=p.getpid())
                     if self.vars["?"] != "0" and self.flags.get("e",False):
                         shell_exit(int(self.vars["?"]))
-                    return None
+                    return []
             return []
         finally:
             if self.curr_pipe is not None:
@@ -1433,12 +1440,12 @@ class shell:
             self.last_ending = self.curr_ending
             self.last_pipe = self.curr_pipe
 
-    def run_file(self,fname):
+    def run_file(self,fname:str)->str:
         with open(fname, "r") as fd:
             self.scriptname = fname
             return self.run_text(fd.read())
 
-    def run_text(self,txt):
+    def run_text(self,txt:str)->str:
         try:
             s0 = self.stdin
             s1 = self.stdout
@@ -1463,7 +1470,7 @@ class shell:
             self.stdout = s1
             self.stderr = s2
 
-    def run_text_(self,txt):
+    def run_text_(self,txt:str)->str:
         #here(colored("="*50,"yellow"))
         nchars=50
         if len(txt) < nchars:
