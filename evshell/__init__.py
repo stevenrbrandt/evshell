@@ -632,6 +632,9 @@ class shell:
 
     def bind_to_env(self)->None:
         assert self.exports is not os.environ
+        for v in self.vars:
+            if v not in os.environ:
+                os.environ[v] = self.vars[v]
         for v in os.environ:
             self.vars[v] = os.environ[v]
         self.exports = os.environ
@@ -1640,6 +1643,7 @@ def main()->None:
         sh = sys.argv[0]
         args = sys.argv
     s = shell(args=args, shell_name=sh)
+    s.bind_to_env()
     args = sys.argv
     run_shell(s)
 
