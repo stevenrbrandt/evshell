@@ -511,7 +511,7 @@ class Case:
 
 class shell:
     
-    def __init__(self,args : List[str]=sys.argv, shell_name:str=my_shell, stdout:optio=None, stderr:optio=None, stdin:optio=None)->None:
+    def __init__(self,args : List[str]=sys.argv, shell_name:str=my_shell, stdout:IO[str]=sys.stdout, stderr:IO[str]=sys.stderr, stdin:IO[str]=sys.stdin)->None:
         self.alias_tab : Dict[str,str] = {}
         self.shell_name = shell_name
         self.args = args
@@ -542,9 +542,9 @@ class shell:
             if var not in self.vars:
                 self.vars[var] = os.environ[var]
             self.exports[var] = self.vars[var]
-        self.stdin : optio = stdin
-        self.stdout : optio = stdout
-        self.stderr : optio = stderr
+        self.stdin : IO[str] = stdin
+        self.stdout : IO[str] = stdout
+        self.stderr : IO[str] = stderr
         self.lines : List[Group] = []
         self.cmds : List[Group] = []
         self.stack : List[Tuple[str,TFN]] = []
@@ -1056,7 +1056,7 @@ class shell:
             raise Exception(gr.getPatternName()+": "+gr.substring())
             return [gr.substring()]
 
-    def do_redir(self, redir:Group, sout:optio, serr:optio, sin:optio)->Tuple[optio,optio,optio,bool]:
+    def do_redir(self, redir:Group, sout:IO[str], serr:IO[str], sin:IO[str])->Tuple[IO[str],IO[str],IO[str],bool]:
         out_is_error = False
         fd_from = None
         rn = 0
@@ -1503,7 +1503,7 @@ class shell:
             end = m.gr.end
             txt2 = txt[end:]
             if len(txt2)>0:
-                s.run_text(txt2)
+                self.run_text(txt2)
             if enable_history:
                 with open(history,"a") as fd:
                     print(txt.strip(),file=fd)
@@ -1529,7 +1529,7 @@ class shell:
             #m.showError(self.log_fd)
             return "SYNTAX"
 
-def interactive(shell):
+def interactive(shell:shell)->int:
     try:
         import readline
         c = Completer()
@@ -1569,9 +1569,9 @@ def interactive(shell):
             msg = "EVAL"
             shell.txt = ""
         except EOFError as ee:
-            return shell.vars["?"]
+            return int(shell.vars["?"])
 
-def run_interactive(s):
+def run_interactive(s:shell)->None:
     try:
         rc = interactive(s)
         s.log(msg="session ended normally",rc=rc)
@@ -1589,20 +1589,22 @@ def run_interactive(s):
         s.log_exc(ee)
     exit(rc)
 
-def run_shell(s):
+def run_shell(s:shell)->None:
     args = s.args
     ssh_cmd = os.environ.get("SSH_ORIGINAL_COMMAND",None)
+    rc : int
+    rs : str
     if ssh_cmd is not None:
         try:
-            rc = s.run_text(ssh_cmd)
-            s.log(rc=rc)
+            rs = s.run_text(ssh_cmd)
+            s.log(rs=rs)
         except Exception as ee:
             s.log_exc(ee)
     elif os.path.realpath(s.shell_name) != os.path.realpath(s.args[0]):
         s.scriptname  = s.args[0]
         with s.open_file(s.args[0],"r",1) as fd:
-            rc = s.run_text(fd.read())
-            s.log(rc=rc)
+            rs = s.run_text(fd.read())
+            s.log(rs=rs)
     else:
         found = False
         for n in range(1,len(args)):
@@ -1615,9 +1617,9 @@ def run_shell(s):
                 with s.open_file(f,"r",1) as fd:
                     try:
                         found = True
-                        rc = s.run_text(fd.read())
-                        s.log(rc=rc)
-                        assert rc == "EVAL", f"rc={rc}"
+                        rs = s.run_text(fd.read())
+                        s.log(rs=rs)
+                        assert rs == "EVAL", f"rc={rc}"
                     except ShellAccess as sa:
                         rc = -1
                         s.err(sa)
@@ -1630,7 +1632,7 @@ def run_shell(s):
         if not found:
             run_interactive(s)
 
-def main():
+def main()->None:
     if len(sys.argv)>1 and os.access(sys.argv[0], os.R_OK):
         sh = my_shell
         args = sys.argv[1:]
