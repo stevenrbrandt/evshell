@@ -481,9 +481,9 @@ def expandtilde(slist : Token)->Token:
             new_slist += [s]
     return new_slist
 
-pyfunc_t = Callable[[List[str]],Token]
+pyfunc_t = Callable[['shell',List[str]],Token]
 
-def printf(args : List[str])->Token:
+def printf(sh:'shell', args : List[str])->Token:
     pyargs : List[Union[str,int,float]] = []
     for arg in args[1:]:
         try:
@@ -497,7 +497,7 @@ def printf(args : List[str])->Token:
         except:
             pass
         pyargs += [arg]
-    print(args[0] % tuple(pyargs))
+    print(args[0] % tuple(pyargs),end='',file=sh.stdout)
     return []
 
 optio = Optional[IO[str]]
@@ -1286,7 +1286,7 @@ class shell:
             elif args[0] in self.pyfuncs:
                 # Invoke a python function
                 try:
-                    return self.pyfuncs[args[0]](args[1:])
+                    return self.pyfuncs[args[0]](self, args[1:])
                 except Exception as e:
                     print(colored(f"'{args[0]}' threw '{type(e)}: {e}'","red"))
                     return []
