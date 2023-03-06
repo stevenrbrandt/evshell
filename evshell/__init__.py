@@ -267,7 +267,7 @@ TokenElement = Union[str,Group,Space,Tuple[str,Group],Tuple[str]]
 # Meaning
 # Tuple[str,Group] -> used for globs
 # Tuple[str] -> literal string, no more processing
-# Space -> literal whitespace
+# Space -> literal whitespace, token separator
 Token = List[TokenElement]
 
 def is_glob_star(elem : TokenElement)->bool:
